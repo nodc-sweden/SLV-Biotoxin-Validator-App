@@ -20,19 +20,23 @@ jobs:
         with:
           r-version: '4.3.1'
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-
-      - name: Install required R packages
+      - name: Install system dependencies for geospatial packages
         run: |
-          install.packages(c("DT", "leaflet", "lubridate", "readxl", 
-                             "sf", "shiny", "terra", "tidyverse", "worrms"))
-        shell: Rscript {0}
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+          sudo apt-get install -y libudunits2-dev libgdal-dev libgeos-dev libproj-dev
 
       - name: Restore R dependencies with renv
         run: Rscript -e "if ('renv' %in% rownames(installed.packages())) renv::restore()"
 
-      - name: Install R packages
+      - name: Install any missing R packages
+        run: |
+          install.packages(setdiff(c("DT", "leaflet", "lubridate", "readxl", 
+                                     "sf", "shiny", "terra", "tidyverse", "worrms"), 
+                                   rownames(installed.packages())))
+        shell: Rscript {0}
+
+      - name: Install rsconnect
         run: Rscript -e "install.packages('rsconnect')"
 
       - name: Deploy to shinyapps.io
