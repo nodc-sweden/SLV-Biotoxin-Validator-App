@@ -7,23 +7,14 @@
 #    https://shiny.posit.co/
 #
 
-# Install packages
-if (!requireNamespace("shiny", quietly = TRUE)) install.packages("shiny")
-if (!requireNamespace("tidyverse", quietly = TRUE)) install.packages("tidyverse")
-if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
-if (!requireNamespace("sf", quietly = TRUE)) install.packages("sf")
-if (!requireNamespace("leaflet", quietly = TRUE)) install.packages("leaflet")
-if (!requireNamespace("worrms", quietly = TRUE)) install.packages("worrms")
-if (!requireNamespace("DT", quietly = TRUE)) install.packages("DT")
-
 # Load required libraries
-library(shiny)
-library(tidyverse)
-library(readxl)
-library(sf)
-library(leaflet)
-library(worrms)
-library(DT)
+require(shiny)
+require(tidyverse)
+require(readxl)
+require(sf)
+require(leaflet)
+require(worrms)
+require(DT)
 
 # Load function from iRfcb
 source("R/ifcb_is_near_land.R")
