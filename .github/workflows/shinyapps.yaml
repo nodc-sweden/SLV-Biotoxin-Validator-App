@@ -23,6 +23,15 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
+      - name: Install required R packages
+        run: |
+          install.packages(c("DT", "leaflet", "lubridate", "readxl", 
+                             "sf", "shiny", "terra", "tidyverse", "worrms"))
+        shell: Rscript {0}
+
+      - name: Restore R dependencies with renv
+        run: Rscript -e "if ('renv' %in% rownames(installed.packages())) renv::restore()"
+
       - name: Install R packages
         run: Rscript -e "install.packages('rsconnect')"
 
