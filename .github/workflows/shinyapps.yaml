@@ -21,8 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          install.packages("shiny")
-          install.packages("rsconnect")
+          Rscript -e 'install.packages(c("shiny", "rsconnect"))'
 
       - name: Deploy to shinyapps.io
         env:
