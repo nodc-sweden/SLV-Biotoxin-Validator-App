@@ -26,8 +26,11 @@ jobs:
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
           sudo apt-get install -y libudunits2-dev libgdal-dev libgeos-dev libproj-dev
 
+      - name: Install renv manually
+        run: Rscript -e "install.packages('renv')"
+
       - name: Restore R dependencies with renv
-        run: Rscript -e "if ('renv' %in% rownames(installed.packages())) renv::restore()"
+        run: Rscript -e "renv::restore()"
 
       - name: Install any missing R packages
         run: |
@@ -35,6 +38,9 @@ jobs:
                                      "sf", "shiny", "terra", "tidyverse", "worrms"), 
                                    rownames(installed.packages())))
         shell: Rscript {0}
+
+      - name: Force install tidyverse
+        run: Rscript -e "install.packages('tidyverse')"
 
       - name: Install rsconnect
         run: Rscript -e "install.packages('rsconnect')"
