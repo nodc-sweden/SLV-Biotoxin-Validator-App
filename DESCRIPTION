@@ -1,0 +1,12 @@
+Package: SLV-Biotoxin-Validator-App
+Type: Application
+Title: SLV Biotoxin Validator App
+Version: 0.1.0
+Imports:
+    shiny,
+    tidyverse,
+    readxl,
+    sf,
+    leaflet,
+    worrms,
+    DT
