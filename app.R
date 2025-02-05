@@ -112,7 +112,7 @@ ui <- fluidPage(
                                     tags$a(href = "https://shark.smhi.se/", 
                                            "SHARK", target = "_blank"))
                           ),
-                          p("Source code available on", 
+                          p("The source code for this application is available on", 
                             tags$a(href = "https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App", 
                                    "GitHub", target = "_blank")
                           ),
@@ -380,8 +380,13 @@ server <- function(input, output, session) {
   # Update dropdown choices dynamically based on toxin_list
   observe({
     req(processed_data())
-    updateSelectInput(session, "selected_param", choices = toxin_list$Parameter)
-    updateSelectInput(session, "selected_param_map", choices = toxin_list$Parameter)
+    processed_df <- processed_data()
+    
+    toxin_choices <- toxin_list %>%
+      filter(Parameter %in% names(processed_df))
+    
+    updateSelectInput(session, "selected_param", choices = toxin_choices$Parameter)
+    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Parameter)
   })
   
   # Generate time series plot
