@@ -94,7 +94,31 @@ ui <- fluidPage(
                    column(6, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("spatial_plot", height = "800px")
+        ),
+        tabPanel("About",
+                 fluidRow(
+                   column(12, 
+                          h3("About This Application"),
+                          p("This Shiny application provides tools for validating marine biotoxin data collected by the SLV."),
+                          p("Key Features:"),
+                          tags$ul(
+                            tags$li("Upload and validate biotoxin data from Excel files, following the export format from Eurofins."),
+                            tags$li("Visualize sampling locations on an interactive map."),
+                            tags$li("Check for missing or incorrect coordinates. Data in red color require action before, orange may need attention."),
+                            tags$li("Validate taxonomic classifications using WoRMS. Data in red color require action."),
+                            tags$li("Analyze site names and their corresponding regions. Data in red color require action."),
+                            tags$li("Explore time series and spatial trends."),
+                            tags$li("After validation, download a processed data file that can be delivered to",                             
+                                    tags$a(href = "https://shark.smhi.se/", 
+                                           "SHARK", target = "_blank"))
+                          ),
+                          p("Source code available on", 
+                            tags$a(href = "https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App", 
+                                   "GitHub", target = "_blank")
+                          ),
+                   )
                  )
+        )
       )
     )
   )

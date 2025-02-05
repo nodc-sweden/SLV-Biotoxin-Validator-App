@@ -1,7 +1,7 @@
 # SLV Marine Biotoxin Data Validation App
 
 ## Overview
-This Shiny web application validates marine biotoxin data from the Swedish Food Agency (SLV). 
+This [Shiny application](https://anderstorstensson.shinyapps.io/slv-biotoxin-validator-app/) validates marine biotoxin data from the Swedish Food Agency (SLV). 
 It allows users to upload Excel files containing detailed sampling data, verify geographic coordinates, 
 validate taxonomic names, and visualize data through interactive maps and plots. After validation,
 data are downloaded in a format suitable for the [SHARK](https://shark.smhi.se/) database.
@@ -18,7 +18,7 @@ data are downloaded in a format suitable for the [SHARK](https://shark.smhi.se/)
 - **Download Processed Data:** Export validated data as a text file for [SHARK](https://shark.smhi.se/).
 
 ## Installation
-Ensure that you have R and the necessary libraries installed.
+To run the app locally, ensure that you have R and the necessary libraries installed.
 
 ### Required R Packages
 ```r
@@ -47,6 +47,15 @@ shiny::runApp("app.R")
 - **Land Detection:** Identifies sites that are potentially placed on land.
 - **Taxonomic Validation:** Matches names with WoRMS database.
 - **Site Extraction:** Parses and extracts relevant site details.
+
+## Config files
+This Shiny app uses three configuration files to ensure that toxins, production areas, and other relevant data are correctly mapped to the SHARK format. Additional toxins, production areas, and other entries can be added as needed.
+- **`config/Format_Marine_Biotoxin.xlsx`** – Defines the SHARK data delivery format.
+- **`config/lista_toxiner.xlsx`** – Contains toxin metadata and parameter mappings.
+- **`config/production_areas.xlsx`** – Provides metadata for each production area.
+
+## Deployment to Shinyapps.io
+This repository is automatically deployed as a Shinyapps.io [web application](https://anderstorstensson.shinyapps.io/slv-biotoxin-validator-app/) on every push of the `main` branch through GitHub Actions.
 
 ## License
 This project is licensed under the MIT License.
