@@ -24,7 +24,7 @@ coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet
 
 # Read list of toxins
 toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
-  select(`Eurofins beteckning`, Parameter, Enhet, `Gränsvärde A`, `Gränsvärde B`) %>%
+  select(`Rapporterat-parameternamn`, Parameter, Enhet, `Gränsvärde_kommersiell_försäljning`) %>%
   drop_na(Parameter)
 
 # Function to convert DDMM coordinates to decimal degrees
@@ -276,10 +276,20 @@ server <- function(input, output, session) {
     taxa <- taxa_data$taxa
     
     # Create a named vector for renaming
-    rename_map <- setNames(toxin_list$Parameter, toxin_list$`Eurofins beteckning`)
+    rename_map <- setNames(toxin_list$Parameter, toxin_list$`Rapporterat-parameternamn`)
+    
+    # Extract logical columns
+    logical_cols <- toxin_list %>%
+      filter(Enhet == "SANT_eller_FALSKT")
     
     # Rename parameters
     data <- data %>%
+      mutate(across(all_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
+        . == "Ej påvisad" ~ FALSE, 
+        . == "~PV0016C" ~ FALSE,
+        . == "Påvisad" ~ TRUE,
+        TRUE ~ NA_real_
+      ))) %>%
       rename_with(~ rename_map[.x], .cols = all_of(names(rename_map)))
     
     # Loop through each parameter in toxin_list
@@ -387,7 +397,7 @@ server <- function(input, output, session) {
     # Get threshold values
     thresholds <- toxin_list %>%
       filter(Parameter == param) %>%
-      select(`Gränsvärde A`, `Gränsvärde B`)
+      select(Gränsvärde_kommersiell_försäljning)
     
     # Get unit
     unit <- toxin_list %>%
@@ -401,8 +411,7 @@ server <- function(input, output, session) {
         facet_wrap(~ LATNM, ncol = 1) +
         labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
         theme_minimal() +
-        geom_hline(data = thresholds, aes(yintercept = `Gränsvärde A`), linetype = "dashed", color = "red") +
-        geom_hline(data = thresholds, aes(yintercept = `Gränsvärde B`), linetype = "dashed", color = "blue") +
+        geom_hline(data = thresholds, aes(yintercept = `Gränsvärde_kommersiell_försäljning`), linetype = "dashed", color = "red", na.rm = TRUE) +
         theme(
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
