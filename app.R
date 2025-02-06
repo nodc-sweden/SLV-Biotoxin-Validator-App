@@ -16,8 +16,8 @@ require(leaflet)
 require(worrms)
 require(DT)
 
-# Load function from iRfcb
-source("R/ifcb_is_near_land.R")
+# Load helper functions
+source("R/helper.R")
 
 # Load shapefile for Swedish Westcoast
 coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE)
@@ -26,45 +26,6 @@ coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet
 toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
   select(`Rapporterat-parameternamn`, Parameter, Enhet, `Gränsvärde_kommersiell_försäljning`) %>%
   drop_na(Parameter)
-
-# Function to convert DDMM coordinates to decimal degrees
-convert_ddmm_to_dd <- function(coord) {
-  coord <- as.character(coord)  # Ensure input is character
-  coord <- gsub("[^0-9]", "", coord)  # Remove non-numeric characters
-  
-  # Handle cases where input is too short
-  coord[nchar(coord) < 6] <- NA
-  
-  # Extract components safely
-  deg <- suppressWarnings(as.numeric(substr(coord, 1, 2)))
-  min <- suppressWarnings(as.numeric(substr(coord, 3, 4)))
-  min_decimals <- suppressWarnings(as.numeric(substr(coord, 5, 6)))
-  
-  # Handle cases where conversion fails
-  valid <- !(is.na(deg) | is.na(min) | is.na(min_decimals))
-  
-  min_with_decimals <- ifelse(valid, min + (min_decimals / 100), NA)
-  decimal_degrees <- ifelse(valid, deg + (min_with_decimals / 60), NA)
-  
-  return(decimal_degrees)
-}
-
-# Function to extract site and number from a string
-extract_site_and_number <- function(input_string) {
-  # Regex to extract the first 3-digit number in the string
-  match <- regmatches(input_string, regexpr("\\b(\\d{3})\\b", input_string))
-  
-  if (length(match) == 0) {
-    return(list(site = input_string, number = NA))  # No 3-digit number found
-  }
-  
-  # Extract everything before the first 3-digit number as site name
-  site_name <- sub("\\s*\\d{3}.*$", "", input_string) 
-  
-  number <- as.numeric(match)  # Convert extracted number to numeric
-  
-  return(list(site = trimws(site_name), number = number))
-}
 
 # Define UI for application
 ui <- fluidPage(
@@ -94,7 +55,25 @@ ui <- fluidPage(
                    column(6, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("spatial_plot", height = "800px")
+        ),
+        tabPanel("About",
+                 fluidRow(
+                   column(12, 
+                          h3("About This Application"),
+                          p("This Shiny application provides tools for validating and processing marine biotoxin data collected by the SLV."),
+                          p("Instructions:"),
+                          tags$ul(
+                            tags$li("Upload and validate biotoxin data from Excel files, following the export format from Eurofins."),
+                            tags$li("Visualize sampling locations on an interactive map."),
+                            tags$li("Check for missing or incorrect coordinates. Data in red color will require action before data submission to SHARK, orange may need attention."),
+                            tags$li("Validate taxonomic names using the World Register of Marine Species (WoRMS). Data in red color require action."),
+                            tags$li("Analyze site names and their corresponding regions. Data in red color require action."),
+                            tags$li("Explore time series and spatial trends."),
+                            tags$li(HTML('After validation, download a processed data file that can be delivered to <a href="https://shark.smhi.se/" target="_blank">SHARK</a>.')))),
+                   p(HTML('The source code for this application is available on <a href="https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App" target="_blank">GitHub</a>.')
+                   )
                  )
+        )
       )
     )
   )
@@ -356,8 +335,13 @@ server <- function(input, output, session) {
   # Update dropdown choices dynamically based on toxin_list
   observe({
     req(processed_data())
-    updateSelectInput(session, "selected_param", choices = toxin_list$Parameter)
-    updateSelectInput(session, "selected_param_map", choices = toxin_list$Parameter)
+    processed_df <- processed_data()
+    
+    toxin_choices <- toxin_list %>%
+      filter(Parameter %in% names(processed_df))
+    
+    updateSelectInput(session, "selected_param", choices = toxin_choices$Parameter)
+    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Parameter)
   })
   
   # Generate time series plot
