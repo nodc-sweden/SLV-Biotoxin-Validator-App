@@ -136,3 +136,42 @@ ifcb_is_near_land <- function(latitudes,
   # Return the logical vector indicating near land with NAs for original NA positions
   return(result)
 }
+
+# Function to convert DDMM coordinates to decimal degrees
+convert_ddmm_to_dd <- function(coord) {
+  coord <- as.character(coord)  # Ensure input is character
+  coord <- gsub("[^0-9]", "", coord)  # Remove non-numeric characters
+  
+  # Handle cases where input is too short
+  coord[nchar(coord) < 6] <- NA
+  
+  # Extract components safely
+  deg <- suppressWarnings(as.numeric(substr(coord, 1, 2)))
+  min <- suppressWarnings(as.numeric(substr(coord, 3, 4)))
+  min_decimals <- suppressWarnings(as.numeric(substr(coord, 5, 6)))
+  
+  # Handle cases where conversion fails
+  valid <- !(is.na(deg) | is.na(min) | is.na(min_decimals))
+  
+  min_with_decimals <- ifelse(valid, min + (min_decimals / 100), NA)
+  decimal_degrees <- ifelse(valid, deg + (min_with_decimals / 60), NA)
+  
+  return(decimal_degrees)
+}
+
+# Function to extract site and number from a string
+extract_site_and_number <- function(input_string) {
+  # Regex to extract the first 3-digit number in the string
+  match <- regmatches(input_string, regexpr("\\b(\\d{3})\\b", input_string))
+  
+  if (length(match) == 0) {
+    return(list(site = input_string, number = NA))  # No 3-digit number found
+  }
+  
+  # Extract everything before the first 3-digit number as site name
+  site_name <- sub("\\s*\\d{3}.*$", "", input_string) 
+  
+  number <- as.numeric(match)  # Convert extracted number to numeric
+  
+  return(list(site = trimws(site_name), number = number))
+}
