@@ -125,7 +125,8 @@ server <- function(input, output, session) {
           "<br>Lat:", LATIT,
           "<br>GPS-koord:", `GPS-koord.`,
           "<br>Provtagningsdatum:", `Provtagningsdatum:`,
-          "<br>Provtagningsplats:", `Provtagningsplats:`
+          "<br>Provtagningsplats:", `Provtagningsplats:`,
+          "<br>Provmärkning:", `Provmärkning`
         )      )
   })
   
@@ -346,7 +347,7 @@ server <- function(input, output, session) {
     
     taxa_choices <- sort(unique(processed_df$LATNM))
     
-    updateSelectInput(session, "selected_taxa", choices = taxa_choices, selected = taxa_choices[1])
+    updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
     updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Parameter))
     updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Parameter))
   })
@@ -400,7 +401,8 @@ server <- function(input, output, session) {
     # Create plot only if df_param has rows
     if (nrow(df_param) > 0) {
       p <- ggplot(df_param, aes(x = SDATE, y = !!sym(param))) +
-        geom_point(aes(color = if_else(is.na(!!sym(q_col)), "FALSE", as.character(str_detect(!!sym(q_col), "<")))), 
+        geom_point(aes(color = if_else(is.na(!!sym(q_col)), "FALSE", 
+                                       as.character(str_detect(!!sym(q_col), "<")))), 
                    na.rm = TRUE, size = 3) +
         scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), 
                            labels = c("FALSE" = "Above LOD", "TRUE" = "Below LOD"), 
@@ -409,7 +411,20 @@ server <- function(input, output, session) {
         facet_wrap(~ LATNM, ncol = 1) +
         labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
         theme_minimal() +
-        geom_hline(data = thresholds, aes(yintercept = `Gränsvärde_kommersiell_försäljning`), linetype = "dashed", color = "red", na.rm = TRUE) +
+        
+        # Only add threshold line if it is not NA
+        geom_hline(data = thresholds %>% filter(!is.na(Gränsvärde_kommersiell_försäljning)), 
+                   aes(yintercept = Gränsvärde_kommersiell_försäljning, 
+                       linetype = "Legal limit"), 
+                   color = "blue", na.rm = TRUE) +
+        
+        scale_linetype_manual(name = "Threshold", values = c("Legal limit" = "dashed")) +
+        
+        # Show threshold legend only if the threshold exists
+        guides(color = guide_legend(order = 1), 
+               linetype = if (any(!is.na(thresholds$Gränsvärde_kommersiell_försäljning))) 
+                 guide_legend(order = 2) else "none") +
+        
         theme(
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
@@ -439,6 +454,11 @@ server <- function(input, output, session) {
     log_scale <- input$log_scale_map
     taxa <- input$selected_taxa
     
+    # Get unit
+    unit <- toxin_list %>%
+      filter(Parameter == param) %>%
+      select(Enhet)
+    
     # Ensure the selected parameter exists and has data
     valid_params <- df %>%
       select(-SDATE, -LATNM, -LONGI, -LATIT) %>%
@@ -453,12 +473,20 @@ server <- function(input, output, session) {
     }
     
     # Prepare data for mapping
-    df_map <- df %>%
-      filter(LATNM == taxa) %>%
-      select(LONGI, LATIT, all_of(param)) %>%
-      drop_na(LONGI, LATIT, all_of(param)) %>%
-      mutate(across(all_of(param), as.numeric)) %>%
-      filter(!is.infinite(!!sym(param)))
+    if (taxa == "All taxa") {
+      df_map <- df %>%
+        select(LONGI, LATIT, all_of(param)) %>%
+        drop_na(LONGI, LATIT, all_of(param)) %>%
+        mutate(across(all_of(param), as.numeric)) %>%
+        filter(!is.infinite(!!sym(param)))
+    } else {
+      df_map <- df %>%
+        filter(LATNM == taxa) %>%
+        select(LONGI, LATIT, all_of(param)) %>%
+        drop_na(LONGI, LATIT, all_of(param)) %>%
+        mutate(across(all_of(param), as.numeric)) %>%
+        filter(!is.infinite(!!sym(param)))
+    }
     
     # Convert to sf object for spatial plotting
     df_map_sf <- st_as_sf(df_map, coords = c("LONGI", "LATIT"), crs = 4326)
@@ -469,8 +497,15 @@ server <- function(input, output, session) {
         geom_sf(data = coastline, fill = "gray80", color = "black") +
         geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
         theme_minimal() +
-        labs(x = "Longitude", y = "Latitude", color = param, size = param) +
+        labs(
+          title = taxa,
+          x = "Longitude",
+          y = "Latitude",
+          color = paste0(param, " (", unit$Enhet, ")"),
+          size = paste0(param, " (", unit$Enhet, ")")
+        ) +
         theme(
+          plot.title = element_text(size = 18, face = "bold"),  # Increased title size
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
           panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
