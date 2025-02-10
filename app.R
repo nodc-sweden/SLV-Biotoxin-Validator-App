@@ -366,9 +366,11 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
+    q_col <- paste0("Q_", param)
+    
     # Filter data for selected parameter
     df_param <- df %>%
-      select(SDATE, LATNM, all_of(param)) %>%
+      select(SDATE, LATNM, all_of(param), all_of(q_col)) %>%
       drop_na(all_of(param)) %>%
       filter(!if_all(all_of(param), is.na)) %>%
       mutate(
@@ -391,7 +393,12 @@ server <- function(input, output, session) {
     # Create plot only if df_param has rows
     if (nrow(df_param) > 0) {
       p <- ggplot(df_param, aes(x = SDATE, y = !!sym(param))) +
-        geom_point(na.rm = TRUE, size = 3) +
+        geom_point(aes(color = if_else(is.na(!!sym(q_col)), "FALSE", as.character(str_detect(!!sym(q_col), "<")))), 
+                   na.rm = TRUE, size = 3) +
+        scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), 
+                           labels = c("FALSE" = "Above LOD", "TRUE" = "Below LOD"), 
+                           name = "Detection Limit") +
+        scale_y_continuous(limits = c(0, NA)) +
         facet_wrap(~ LATNM, ncol = 1) +
         labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
         theme_minimal() +
@@ -400,7 +407,9 @@ server <- function(input, output, session) {
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
           strip.text = element_text(size = 14),
-          panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+          panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+          legend.text = element_text(size = 12),
+          legend.title = element_text(size = 14)
         )
       
       # Apply log scale if selected
@@ -475,7 +484,7 @@ server <- function(input, output, session) {
   output$download <- downloadHandler(
     filename = function() { "data.txt" },
     content = function(file) {
-      write_tsv(processed_data(), file, na = "", progress = FALSE)
+      write.table(processed_data(), file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
   )
 }
