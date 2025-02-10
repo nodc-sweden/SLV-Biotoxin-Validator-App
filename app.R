@@ -39,9 +39,19 @@ ui <- fluidPage(
       tabsetPanel(
         tabPanel("Raw Data", DTOutput("table_raw")),
         tabPanel("Map Validation", leafletOutput("map")),
-        tabPanel("Coordinate Validation", DTOutput("table_missing")),
-        tabPanel("Taxa Validation", DTOutput("table_taxa")),
-        tabPanel("Site Validation", DTOutput("table_sites")),
+        tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
+        tabPanel("Taxa Validation", 
+                 h4("Issues Found"),
+                 DTOutput("table_taxa"),
+                 h4("Valid Entries"),
+                 DTOutput("table_taxa_valid")
+        ),
+        tabPanel("Site Validation",
+                 h4("Issues Found"),
+                 DTOutput("table_sites"),
+                 h4("Valid Entries"),
+                 DTOutput("table_sites_valid")
+        ),
         tabPanel("Time Series Plot",
                  fluidRow(
                    column(6, selectInput("selected_param", "Select Parameter:", choices = NULL)),
@@ -182,20 +192,29 @@ server <- function(input, output, session) {
   
   output$table_taxa <- renderDT({
     taxa <- taxa_data$taxa %>%
+      filter(is.na(scientificname)) %>%
+      rename(`Scientific Name` = scientificname,
+             `Reported Scientific Name` = Provmärkning)
+    
+    datatable(taxa, options = list(pageLength = 25, rowCallback = JS(
+      "function(row, data) { 
+      $(row).css('color', 'red'); 
+    }"
+    )))
+  })
+  
+  output$table_taxa_valid <- renderDT({
+    taxa_valid <- taxa_data$taxa %>%
+      filter(!is.na(scientificname)) %>%
       arrange(scientificname) %>%
       rename(`Scientific Name` = scientificname,
              `Reported Scientific Name` = Provmärkning)
     
-    datatable(taxa, options = list(pageLength = 25,
-                                   rowCallback = JS(
-                                     "function(row, data) { 
-                                     if (data[2] === null) { 
-                                       $(row).css('color', 'red'); 
-                                     } else { 
-                                       $(row).css('color', 'green'); 
-                                     } 
-                                   }"
-                                   )))
+    datatable(taxa_valid, options = list(pageLength = 25, rowCallback = JS(
+      "function(row, data) { 
+      $(row).css('color', 'green'); 
+    }"
+    )))
   })
   
   # Store site_df in a reactive object
@@ -234,6 +253,38 @@ server <- function(input, output, session) {
       rename(`Reported Site` = `Provtagningsplats:`,
              `SLV Area` = `SLV produktionssområde`,
              `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+      filter(is.na(`SLV Area`)) %>%
+      arrange(`SLV Area Number`)
+    
+    datatable(locations, options = list(pageLength = 50,
+                                        rowCallback = JS(
+                                          "function(row, data) { 
+                                          if (data[3] === null) { 
+                                            $(row).css('color', 'red'); 
+                                          } else { 
+                                            $(row).css('color', 'green'); 
+                                          } 
+                                        }"
+                                        )))
+  })
+  
+  output$table_sites_valid <- renderDT({
+    site_df <- site_df_data()  # Get the site_df from the reactive object
+    
+    df <- data()
+    
+    # Add the final output
+    df$`SLV produktionssområde` <- site_df$Produktionssområde
+    df$`SLV produktionsområdesrådesnummer` <- site_df$number
+    df$`SLV namn` <- site_df$site
+    
+    locations <- df %>%   
+      group_by(`Provtagningsplats:`, `SLV produktionsområdesrådesnummer`, `SLV produktionssområde`) %>%
+      summarise(`N visits` = n(), .groups = "drop") %>%
+      rename(`Reported Site` = `Provtagningsplats:`,
+             `SLV Area` = `SLV produktionssområde`,
+             `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+      filter(!is.na(`SLV Area`)) %>%
       arrange(`SLV Area Number`)
     
     datatable(locations, options = list(pageLength = 50,
