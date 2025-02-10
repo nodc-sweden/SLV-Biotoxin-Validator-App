@@ -51,8 +51,9 @@ ui <- fluidPage(
         ),
         tabPanel("Geographical Plot",
                  fluidRow(
-                   column(6, selectInput("selected_param_map", "Select Parameter:", choices = NULL)),
-                   column(6, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
+                   column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
+                   column(4, selectInput("selected_param_map", "Select Parameter:", choices = NULL)),
+                   column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("spatial_plot", height = "800px")
         ),
@@ -257,6 +258,9 @@ server <- function(input, output, session) {
     # Create a named vector for renaming
     rename_map <- setNames(toxin_list$Parameter, toxin_list$`Rapporterat-parameternamn`)
     
+    # Only remap existing colnames
+    rename_map <- rename_map[names(rename_map) %in% names(data)]
+    
     # Extract logical columns
     logical_cols <- toxin_list %>%
       filter(Enhet == "SANT_eller_FALSKT")
@@ -340,8 +344,11 @@ server <- function(input, output, session) {
     toxin_choices <- toxin_list %>%
       filter(Parameter %in% names(processed_df))
     
-    updateSelectInput(session, "selected_param", choices = toxin_choices$Parameter)
-    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Parameter)
+    taxa_choices <- sort(unique(processed_df$LATNM))
+    
+    updateSelectInput(session, "selected_taxa", choices = taxa_choices, selected = taxa_choices[1])
+    updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Parameter))
+    updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Parameter))
   })
   
   # Generate time series plot
@@ -430,6 +437,7 @@ server <- function(input, output, session) {
     df <- processed_data()
     param <- input$selected_param_map
     log_scale <- input$log_scale_map
+    taxa <- input$selected_taxa
     
     # Ensure the selected parameter exists and has data
     valid_params <- df %>%
@@ -446,6 +454,7 @@ server <- function(input, output, session) {
     
     # Prepare data for mapping
     df_map <- df %>%
+      filter(LATNM == taxa) %>%
       select(LONGI, LATIT, all_of(param)) %>%
       drop_na(LONGI, LATIT, all_of(param)) %>%
       mutate(across(all_of(param), as.numeric)) %>%
@@ -455,30 +464,34 @@ server <- function(input, output, session) {
     df_map_sf <- st_as_sf(df_map, coords = c("LONGI", "LATIT"), crs = 4326)
     
     # Create map
-    p_map <- ggplot() +
-      geom_sf(data = coastline, fill = "gray80", color = "black") +
-      geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
-      theme_minimal() +
-      labs(x = "Longitude", y = "Latitude", color = param, size = param) +
-      theme(
-        axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12),
-        panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-      ) +
-      coord_sf(expand = FALSE)
-    
-    # Apply log scale if selected
-    if (log_scale == "log10") {
-      p_map <- p_map + 
-        scale_size_continuous(transform = "log10", range = c(8, 20)) + 
-        scale_color_viridis_c(option = "plasma", transform = "log10")
+    if (nrow(df_map) > 0) {
+      p_map <- ggplot() +
+        geom_sf(data = coastline, fill = "gray80", color = "black") +
+        geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
+        theme_minimal() +
+        labs(x = "Longitude", y = "Latitude", color = param, size = param) +
+        theme(
+          axis.title = element_text(size = 14),
+          axis.text = element_text(size = 12),
+          panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+        ) +
+        coord_sf(expand = FALSE)
+      
+      # Apply log scale if selected
+      if (log_scale == "log10") {
+        p_map <- p_map + 
+          scale_size_continuous(transform = "log10", range = c(8, 20)) + 
+          scale_color_viridis_c(option = "plasma", transform = "log10")
+      } else {
+        p_map <- p_map + 
+          scale_size_continuous(range = c(8, 20)) + 
+          scale_color_viridis_c(option = "plasma")
+      }
+      
+      p_map
     } else {
-      p_map <- p_map + 
-        scale_size_continuous(range = c(8, 20)) + 
-        scale_color_viridis_c(option = "plasma")
+      showNotification(paste("No valid data for the selected parameter:", param, "and taxa:", taxa), type = "warning")
     }
-    
-    p_map
   })
   
   output$download <- downloadHandler(
