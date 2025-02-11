@@ -37,8 +37,11 @@ ui <- fluidPage(
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Raw Data", DTOutput("table_raw")),
-        tabPanel("Map Validation", leafletOutput("map")),
+        tabPanel("Validation Summary",
+                 h4("Issue Summary"),
+                 DTOutput("table_summary")
+        ),
+        tabPanel("Map Validation", leafletOutput("map", height = "800px")),
         tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
         tabPanel("Taxa Validation", 
                  h4("Issues Found"),
@@ -67,6 +70,7 @@ ui <- fluidPage(
                  ),
                  plotOutput("spatial_plot", height = "800px")
         ),
+        tabPanel("Raw Data", DTOutput("table_raw")),
         tabPanel("About",
                  fluidRow(
                    column(12, 
@@ -112,57 +116,6 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  output$table_raw <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
-    
-    withProgress(message = "Loading data...", value = 0.5, {
-      Sys.sleep(1)  # Simulate processing time
-      datatable(data())
-    })
-  })
-  
-  output$map <- renderLeaflet({
-    df_map <- data() %>%
-      filter(!is.na(LATIT) & !is.na(LONGI))
-    leaflet(df_map) %>%
-      addTiles() %>%
-      addCircleMarkers(
-        ~LONGI, ~LATIT,
-        radius = 5,
-        color = ~ifelse(on_land == TRUE, "red", "blue"),
-        popup = ~paste(
-          "Lon:", LONGI, 
-          "<br>Lat:", LATIT,
-          "<br>GPS-koord:", `GPS-koord.`,
-          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
-          "<br>Provtagningsplats:", `Provtagningsplats:`,
-          "<br>Provmärkning:", `Provmärkning`
-        )      )
-  })
-  
-  output$table_missing <- renderDT({
-    df_missing <- data() %>%
-      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
-      select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
-      rename(`Reported Site` = `Provtagningsplats:`,
-             Date = `Provtagningsdatum:`,
-             `GPS-coord` = `GPS-koord.`,
-             `On land` = on_land)
-    
-    datatable(df_missing, options = list(
-      pageLength = 25,
-      rowCallback = JS(
-        "function(row, data) { 
-      var onLand = data[4];
-      if (onLand == true) {
-        $(row).css('color', 'orange');
-      } else {
-        $(row).css('color', 'red');
-      }
-    }"
-      )
-    ))
-  })
   
   # Create a reactiveValues object to store taxa
   taxa_data <- reactiveValues(taxa = NULL)
@@ -190,13 +143,112 @@ server <- function(input, output, session) {
     taxa_data$taxa <- taxa
   })
   
+  output$table_summary <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df <- data()
+    taxa <- taxa_data$taxa
+    site_df <- site_df_data()
+    
+    # Count coordinate issues
+    coord_issues <- df %>%
+      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
+      nrow()
+    
+    # Count taxa validation issues
+    taxa_issues <- df %>%
+      left_join(taxa, by = "Provmärkning") %>%
+      filter(is.na(scientificname)) %>%
+      nrow()
+    
+    # Add the final output
+    df$`SLV produktionssområde` <- site_df$Produktionssområde
+    df$`SLV produktionsområdesrådesnummer` <- site_df$number
+    df$`SLV namn` <- site_df$site
+    
+    site_issues <- df %>%   
+      filter(is.na(`SLV produktionsområdesrådesnummer`)) %>%
+      nrow()
+    
+    # Create summary dataframe
+    summary_df <- data.frame(
+      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues"),
+      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues), check.names = FALSE
+    )
+    
+    withProgress(message = "Loading data...", value = 0.5, {
+      datatable(summary_df, options = list(dom = 't', rowCallback = JS(
+        "function(row, data) { 
+      $(row).css('color', 'red'); 
+    }"
+      )))
+    })
+  })
+  
+  output$table_raw <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df <- data() %>%
+      select(-LATIT, -LONGI, -on_land)
+    
+    datatable(df)
+  })
+  
+  output$map <- renderLeaflet({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df_map <- data() %>%
+      filter(!is.na(LATIT) & !is.na(LONGI))
+    leaflet(df_map) %>%
+      addTiles() %>%
+      addCircleMarkers(
+        ~LONGI, ~LATIT,
+        radius = 5,
+        color = ~ifelse(on_land == TRUE, "red", "blue"),
+        popup = ~paste(
+          "Lon:", LONGI, 
+          "<br>Lat:", LATIT,
+          "<br>GPS-koord:", `GPS-koord.`,
+          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
+          "<br>Provtagningsplats:", `Provtagningsplats:`,
+          "<br>Provmärkning:", `Provmärkning`
+        )      )
+  })
+  
+  output$table_missing <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    df_missing <- data() %>%
+      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
+      select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
+      rename(`Reported Site` = `Provtagningsplats:`,
+             Date = `Provtagningsdatum:`,
+             `GPS-coord` = `GPS-koord.`,
+             `On land` = on_land)
+    
+    datatable(df_missing, options = list(
+      pageLength = 25, 
+      language = list(emptyTable = "No issues found"),
+      rowCallback = JS(
+        "function(row, data) { 
+      var onLand = data[4];
+      if (onLand == true) {
+        $(row).css('color', 'orange');
+      } else {
+        $(row).css('color', 'red');
+      }
+    }"
+      )
+    ))
+  })
+  
   output$table_taxa <- renderDT({
+    validate(need(input$file, ""))
     taxa <- taxa_data$taxa %>%
       filter(is.na(scientificname)) %>%
       rename(`Scientific Name` = scientificname,
              `Reported Scientific Name` = Provmärkning)
     
-    datatable(taxa, options = list(pageLength = 25, rowCallback = JS(
+    datatable(taxa, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
       "function(row, data) { 
       $(row).css('color', 'red'); 
     }"
@@ -204,6 +256,7 @@ server <- function(input, output, session) {
   })
   
   output$table_taxa_valid <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
     taxa_valid <- taxa_data$taxa %>%
       filter(!is.na(scientificname)) %>%
       arrange(scientificname) %>%
@@ -219,6 +272,7 @@ server <- function(input, output, session) {
   
   # Store site_df in a reactive object
   site_df_data <- reactive({
+    validate(need(input$file, "Waiting for file upload..."))
     areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
     
     df <- data()
@@ -238,6 +292,7 @@ server <- function(input, output, session) {
   })
   
   output$table_sites <- renderDT({
+    validate(need(input$file, ""))
     site_df <- site_df_data()  # Get the site_df from the reactive object
     
     df <- data()
@@ -256,7 +311,8 @@ server <- function(input, output, session) {
       filter(is.na(`SLV Area`)) %>%
       arrange(`SLV Area Number`)
     
-    datatable(locations, options = list(pageLength = 50,
+    datatable(locations, options = list(pageLength = 50, 
+                                        language = list(emptyTable = "No issues found"),
                                         rowCallback = JS(
                                           "function(row, data) { 
                                           if (data[3] === null) { 
@@ -269,6 +325,7 @@ server <- function(input, output, session) {
   })
   
   output$table_sites_valid <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
     site_df <- site_df_data()  # Get the site_df from the reactive object
     
     df <- data()
