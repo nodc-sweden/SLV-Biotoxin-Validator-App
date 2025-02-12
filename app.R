@@ -33,7 +33,8 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Upload Excel File", accept = ".xlsx"),
-      downloadButton("download", "Download Processed .txt File")
+      downloadButton("download", "Download Processed .txt File"),
+      width = 2
     ),
     mainPanel(
       tabsetPanel(
