@@ -24,7 +24,7 @@ coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet
 
 # Read list of toxins
 toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
-  select(`Rapporterat-parameternamn`, Parameter, Enhet, `Gränsvärde_kommersiell_försäljning`) %>%
+  select(`Rapporterat-parameternamn`, Parameter, Enhet, Parameternamn_MH, `Gränsvärde_kommersiell_försäljning`) %>%
   drop_na(Parameter)
 
 # Define UI for application
@@ -34,15 +34,15 @@ ui <- fluidPage(
     sidebarPanel(
       fileInput("file", "Upload Excel File", accept = ".xlsx"),
       downloadButton("download", "Download Processed .txt File"),
-      width = 2
+      width = 3
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Validation Summary",
+        tabPanel("Summary",
                  h4("Issue Summary"),
                  DTOutput("table_summary")
         ),
-        tabPanel("Map Validation", leafletOutput("map", height = "800px")),
+        tabPanel("Map", leafletOutput("map", height = "800px")),
         tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
         tabPanel("Taxa Validation", 
                  h4("Issues Found"),
@@ -312,7 +312,7 @@ server <- function(input, output, session) {
       filter(is.na(`SLV Area`)) %>%
       arrange(`SLV Area Number`)
     
-    datatable(locations, options = list(pageLength = 50, 
+    datatable(locations, options = list(pageLength = 25, 
                                         language = list(emptyTable = "No issues found"),
                                         rowCallback = JS(
                                           "function(row, data) { 
@@ -507,6 +507,11 @@ server <- function(input, output, session) {
       filter(Parameter == param) %>%
       select(Enhet)
     
+    # Get toxin name
+    toxin <- toxin_list %>%
+      filter(Parameter == param) %>%
+      select(Parameternamn_MH)
+    
     # Create plot only if df_param has rows
     if (nrow(df_param) > 0) {
       p <- ggplot(df_param, aes(x = SDATE, y = !!sym(param))) +
@@ -518,7 +523,7 @@ server <- function(input, output, session) {
                            name = "Detection Limit") +
         scale_y_continuous(limits = c(0, NA)) +
         facet_wrap(~ LATNM, ncol = 1) +
-        labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
+        labs(x = "", y = paste0(toxin$Parameternamn_MH, " (", unit$Enhet, ")")) +
         theme_minimal() +
         
         # Only add threshold line if it is not NA
@@ -568,6 +573,11 @@ server <- function(input, output, session) {
       filter(Parameter == param) %>%
       select(Enhet)
     
+    # Get toxin name
+    toxin <- toxin_list %>%
+      filter(Parameter == param) %>%
+      select(Parameternamn_MH)
+    
     # Ensure the selected parameter exists and has data
     valid_params <- df %>%
       select(-SDATE, -LATNM, -LONGI, -LATIT) %>%
@@ -610,8 +620,8 @@ server <- function(input, output, session) {
           title = taxa,
           x = "Longitude",
           y = "Latitude",
-          color = paste0(param, " (", unit$Enhet, ")"),
-          size = paste0(param, " (", unit$Enhet, ")")
+          color = paste0(toxin$Parameternamn_MH, " (", unit$Enhet, ")"),
+          size = paste0(toxin$Parameternamn_MH, " (", unit$Enhet, ")")
         ) +
         theme(
           plot.title = element_text(size = 18, face = "bold"),  # Increased title size
