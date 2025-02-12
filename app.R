@@ -33,7 +33,8 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Upload Excel File", accept = ".xlsx"),
-      downloadButton("download", "Download Processed .txt File")
+      downloadButton("download", "Download Processed .txt File"),
+      width = 2
     ),
     mainPanel(
       tabsetPanel(
@@ -70,7 +71,7 @@ ui <- fluidPage(
                  ),
                  plotOutput("spatial_plot", height = "800px")
         ),
-        tabPanel("Raw Data", DTOutput("table_raw")),
+        tabPanel("Original Data", DTOutput("table_raw")),
         tabPanel("About",
                  fluidRow(
                    column(12, 
