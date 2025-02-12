@@ -71,7 +71,7 @@ ui <- fluidPage(
                  ),
                  plotOutput("spatial_plot", height = "800px")
         ),
-        tabPanel("Raw Data", DTOutput("table_raw")),
+        tabPanel("Original Data", DTOutput("table_raw")),
         tabPanel("About",
                  fluidRow(
                    column(12, 
