@@ -37,11 +37,24 @@ ui <- fluidPage(
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Raw Data", DTOutput("table_raw")),
-        tabPanel("Map Validation", leafletOutput("map")),
-        tabPanel("Coordinate Validation", DTOutput("table_missing")),
-        tabPanel("Taxa Validation", DTOutput("table_taxa")),
-        tabPanel("Site Validation", DTOutput("table_sites")),
+        tabPanel("Validation Summary",
+                 h4("Issue Summary"),
+                 DTOutput("table_summary")
+        ),
+        tabPanel("Map Validation", leafletOutput("map", height = "800px")),
+        tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
+        tabPanel("Taxa Validation", 
+                 h4("Issues Found"),
+                 DTOutput("table_taxa"),
+                 h4("Valid Entries"),
+                 DTOutput("table_taxa_valid")
+        ),
+        tabPanel("Site Validation",
+                 h4("Issues Found"),
+                 DTOutput("table_sites"),
+                 h4("Valid Entries"),
+                 DTOutput("table_sites_valid")
+        ),
         tabPanel("Time Series Plot",
                  fluidRow(
                    column(6, selectInput("selected_param", "Select Parameter:", choices = NULL)),
@@ -51,11 +64,13 @@ ui <- fluidPage(
         ),
         tabPanel("Geographical Plot",
                  fluidRow(
-                   column(6, selectInput("selected_param_map", "Select Parameter:", choices = NULL)),
-                   column(6, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
+                   column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
+                   column(4, selectInput("selected_param_map", "Select Parameter:", choices = NULL)),
+                   column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("spatial_plot", height = "800px")
         ),
+        tabPanel("Raw Data", DTOutput("table_raw")),
         tabPanel("About",
                  fluidRow(
                    column(12, 
@@ -101,56 +116,6 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  output$table_raw <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
-    
-    withProgress(message = "Loading data...", value = 0.5, {
-      Sys.sleep(1)  # Simulate processing time
-      datatable(data())
-    })
-  })
-  
-  output$map <- renderLeaflet({
-    df_map <- data() %>%
-      filter(!is.na(LATIT) & !is.na(LONGI))
-    leaflet(df_map) %>%
-      addTiles() %>%
-      addCircleMarkers(
-        ~LONGI, ~LATIT,
-        radius = 5,
-        color = ~ifelse(on_land == TRUE, "red", "blue"),
-        popup = ~paste(
-          "Lon:", LONGI, 
-          "<br>Lat:", LATIT,
-          "<br>GPS-koord:", `GPS-koord.`,
-          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
-          "<br>Provtagningsplats:", `Provtagningsplats:`
-        )      )
-  })
-  
-  output$table_missing <- renderDT({
-    df_missing <- data() %>%
-      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
-      select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
-      rename(`Reported Site` = `Provtagningsplats:`,
-             Date = `Provtagningsdatum:`,
-             `GPS-coord` = `GPS-koord.`,
-             `On land` = on_land)
-    
-    datatable(df_missing, options = list(
-      pageLength = 25,
-      rowCallback = JS(
-        "function(row, data) { 
-      var onLand = data[4];
-      if (onLand == true) {
-        $(row).css('color', 'orange');
-      } else {
-        $(row).css('color', 'red');
-      }
-    }"
-      )
-    ))
-  })
   
   # Create a reactiveValues object to store taxa
   taxa_data <- reactiveValues(taxa = NULL)
@@ -178,26 +143,136 @@ server <- function(input, output, session) {
     taxa_data$taxa <- taxa
   })
   
+  output$table_summary <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df <- data()
+    taxa <- taxa_data$taxa
+    site_df <- site_df_data()
+    
+    # Count coordinate issues
+    coord_issues <- df %>%
+      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
+      nrow()
+    
+    # Count taxa validation issues
+    taxa_issues <- df %>%
+      left_join(taxa, by = "Provmärkning") %>%
+      filter(is.na(scientificname)) %>%
+      nrow()
+    
+    # Add the final output
+    df$`SLV produktionssområde` <- site_df$Produktionssområde
+    df$`SLV produktionsområdesrådesnummer` <- site_df$number
+    df$`SLV namn` <- site_df$site
+    
+    site_issues <- df %>%   
+      filter(is.na(`SLV produktionsområdesrådesnummer`)) %>%
+      nrow()
+    
+    # Create summary dataframe
+    summary_df <- data.frame(
+      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues"),
+      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues), check.names = FALSE
+    )
+    
+    withProgress(message = "Loading data...", value = 0.5, {
+      datatable(summary_df, options = list(dom = 't', rowCallback = JS(
+        "function(row, data) { 
+      $(row).css('color', 'red'); 
+    }"
+      )))
+    })
+  })
+  
+  output$table_raw <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df <- data() %>%
+      select(-LATIT, -LONGI, -on_land)
+    
+    datatable(df)
+  })
+  
+  output$map <- renderLeaflet({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    df_map <- data() %>%
+      filter(!is.na(LATIT) & !is.na(LONGI))
+    leaflet(df_map) %>%
+      addTiles() %>%
+      addCircleMarkers(
+        ~LONGI, ~LATIT,
+        radius = 5,
+        color = ~ifelse(on_land == TRUE, "red", "blue"),
+        popup = ~paste(
+          "Lon:", LONGI, 
+          "<br>Lat:", LATIT,
+          "<br>GPS-koord:", `GPS-koord.`,
+          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
+          "<br>Provtagningsplats:", `Provtagningsplats:`,
+          "<br>Provmärkning:", `Provmärkning`
+        )      )
+  })
+  
+  output$table_missing <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    df_missing <- data() %>%
+      filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
+      select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
+      rename(`Reported Site` = `Provtagningsplats:`,
+             Date = `Provtagningsdatum:`,
+             `GPS-coord` = `GPS-koord.`,
+             `On land` = on_land)
+    
+    datatable(df_missing, options = list(
+      pageLength = 25, 
+      language = list(emptyTable = "No issues found"),
+      rowCallback = JS(
+        "function(row, data) { 
+      var onLand = data[4];
+      if (onLand == true) {
+        $(row).css('color', 'orange');
+      } else {
+        $(row).css('color', 'red');
+      }
+    }"
+      )
+    ))
+  })
+  
   output$table_taxa <- renderDT({
+    validate(need(input$file, ""))
     taxa <- taxa_data$taxa %>%
+      filter(is.na(scientificname)) %>%
+      rename(`Scientific Name` = scientificname,
+             `Reported Scientific Name` = Provmärkning)
+    
+    datatable(taxa, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+      "function(row, data) { 
+      $(row).css('color', 'red'); 
+    }"
+    )))
+  })
+  
+  output$table_taxa_valid <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    taxa_valid <- taxa_data$taxa %>%
+      filter(!is.na(scientificname)) %>%
       arrange(scientificname) %>%
       rename(`Scientific Name` = scientificname,
              `Reported Scientific Name` = Provmärkning)
     
-    datatable(taxa, options = list(pageLength = 25,
-                                   rowCallback = JS(
-                                     "function(row, data) { 
-                                     if (data[2] === null) { 
-                                       $(row).css('color', 'red'); 
-                                     } else { 
-                                       $(row).css('color', 'green'); 
-                                     } 
-                                   }"
-                                   )))
+    datatable(taxa_valid, options = list(pageLength = 25, rowCallback = JS(
+      "function(row, data) { 
+      $(row).css('color', 'green'); 
+    }"
+    )))
   })
   
   # Store site_df in a reactive object
   site_df_data <- reactive({
+    validate(need(input$file, "Waiting for file upload..."))
     areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
     
     df <- data()
@@ -217,6 +292,7 @@ server <- function(input, output, session) {
   })
   
   output$table_sites <- renderDT({
+    validate(need(input$file, ""))
     site_df <- site_df_data()  # Get the site_df from the reactive object
     
     df <- data()
@@ -232,6 +308,40 @@ server <- function(input, output, session) {
       rename(`Reported Site` = `Provtagningsplats:`,
              `SLV Area` = `SLV produktionssområde`,
              `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+      filter(is.na(`SLV Area`)) %>%
+      arrange(`SLV Area Number`)
+    
+    datatable(locations, options = list(pageLength = 50, 
+                                        language = list(emptyTable = "No issues found"),
+                                        rowCallback = JS(
+                                          "function(row, data) { 
+                                          if (data[3] === null) { 
+                                            $(row).css('color', 'red'); 
+                                          } else { 
+                                            $(row).css('color', 'green'); 
+                                          } 
+                                        }"
+                                        )))
+  })
+  
+  output$table_sites_valid <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    site_df <- site_df_data()  # Get the site_df from the reactive object
+    
+    df <- data()
+    
+    # Add the final output
+    df$`SLV produktionssområde` <- site_df$Produktionssområde
+    df$`SLV produktionsområdesrådesnummer` <- site_df$number
+    df$`SLV namn` <- site_df$site
+    
+    locations <- df %>%   
+      group_by(`Provtagningsplats:`, `SLV produktionsområdesrådesnummer`, `SLV produktionssområde`) %>%
+      summarise(`N visits` = n(), .groups = "drop") %>%
+      rename(`Reported Site` = `Provtagningsplats:`,
+             `SLV Area` = `SLV produktionssområde`,
+             `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+      filter(!is.na(`SLV Area`)) %>%
       arrange(`SLV Area Number`)
     
     datatable(locations, options = list(pageLength = 50,
@@ -256,6 +366,9 @@ server <- function(input, output, session) {
     
     # Create a named vector for renaming
     rename_map <- setNames(toxin_list$Parameter, toxin_list$`Rapporterat-parameternamn`)
+    
+    # Only remap existing colnames
+    rename_map <- rename_map[names(rename_map) %in% names(data)]
     
     # Extract logical columns
     logical_cols <- toxin_list %>%
@@ -340,8 +453,11 @@ server <- function(input, output, session) {
     toxin_choices <- toxin_list %>%
       filter(Parameter %in% names(processed_df))
     
-    updateSelectInput(session, "selected_param", choices = toxin_choices$Parameter)
-    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Parameter)
+    taxa_choices <- sort(unique(processed_df$LATNM))
+    
+    updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
+    updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Parameter))
+    updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Parameter))
   })
   
   # Generate time series plot
@@ -366,9 +482,11 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
+    q_col <- paste0("Q_", param)
+    
     # Filter data for selected parameter
     df_param <- df %>%
-      select(SDATE, LATNM, all_of(param)) %>%
+      select(SDATE, LATNM, all_of(param), all_of(q_col)) %>%
       drop_na(all_of(param)) %>%
       filter(!if_all(all_of(param), is.na)) %>%
       mutate(
@@ -391,16 +509,37 @@ server <- function(input, output, session) {
     # Create plot only if df_param has rows
     if (nrow(df_param) > 0) {
       p <- ggplot(df_param, aes(x = SDATE, y = !!sym(param))) +
-        geom_point(na.rm = TRUE, size = 3) +
+        geom_point(aes(color = if_else(is.na(!!sym(q_col)), "FALSE", 
+                                       as.character(str_detect(!!sym(q_col), "<")))), 
+                   na.rm = TRUE, size = 3) +
+        scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), 
+                           labels = c("FALSE" = "Above LOD", "TRUE" = "Below LOD"), 
+                           name = "Detection Limit") +
+        scale_y_continuous(limits = c(0, NA)) +
         facet_wrap(~ LATNM, ncol = 1) +
         labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
         theme_minimal() +
-        geom_hline(data = thresholds, aes(yintercept = `Gränsvärde_kommersiell_försäljning`), linetype = "dashed", color = "red", na.rm = TRUE) +
+        
+        # Only add threshold line if it is not NA
+        geom_hline(data = thresholds %>% filter(!is.na(Gränsvärde_kommersiell_försäljning)), 
+                   aes(yintercept = Gränsvärde_kommersiell_försäljning, 
+                       linetype = "Legal limit"), 
+                   color = "blue", na.rm = TRUE) +
+        
+        scale_linetype_manual(name = "Threshold", values = c("Legal limit" = "dashed")) +
+        
+        # Show threshold legend only if the threshold exists
+        guides(color = guide_legend(order = 1), 
+               linetype = if (any(!is.na(thresholds$Gränsvärde_kommersiell_försäljning))) 
+                 guide_legend(order = 2) else "none") +
+        
         theme(
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
           strip.text = element_text(size = 14),
-          panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+          panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+          legend.text = element_text(size = 12),
+          legend.title = element_text(size = 14)
         )
       
       # Apply log scale if selected
@@ -421,6 +560,12 @@ server <- function(input, output, session) {
     df <- processed_data()
     param <- input$selected_param_map
     log_scale <- input$log_scale_map
+    taxa <- input$selected_taxa
+    
+    # Get unit
+    unit <- toxin_list %>%
+      filter(Parameter == param) %>%
+      select(Enhet)
     
     # Ensure the selected parameter exists and has data
     valid_params <- df %>%
@@ -436,46 +581,66 @@ server <- function(input, output, session) {
     }
     
     # Prepare data for mapping
-    df_map <- df %>%
-      select(LONGI, LATIT, all_of(param)) %>%
-      drop_na(LONGI, LATIT, all_of(param)) %>%
-      mutate(across(all_of(param), as.numeric)) %>%
-      filter(!is.infinite(!!sym(param)))
+    if (taxa == "All taxa") {
+      df_map <- df %>%
+        select(LONGI, LATIT, all_of(param)) %>%
+        drop_na(LONGI, LATIT, all_of(param)) %>%
+        mutate(across(all_of(param), as.numeric)) %>%
+        filter(!is.infinite(!!sym(param)))
+    } else {
+      df_map <- df %>%
+        filter(LATNM == taxa) %>%
+        select(LONGI, LATIT, all_of(param)) %>%
+        drop_na(LONGI, LATIT, all_of(param)) %>%
+        mutate(across(all_of(param), as.numeric)) %>%
+        filter(!is.infinite(!!sym(param)))
+    }
     
     # Convert to sf object for spatial plotting
     df_map_sf <- st_as_sf(df_map, coords = c("LONGI", "LATIT"), crs = 4326)
     
     # Create map
-    p_map <- ggplot() +
-      geom_sf(data = coastline, fill = "gray80", color = "black") +
-      geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
-      theme_minimal() +
-      labs(x = "Longitude", y = "Latitude", color = param, size = param) +
-      theme(
-        axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12),
-        panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
-      ) +
-      coord_sf(expand = FALSE)
-    
-    # Apply log scale if selected
-    if (log_scale == "log10") {
-      p_map <- p_map + 
-        scale_size_continuous(transform = "log10", range = c(8, 20)) + 
-        scale_color_viridis_c(option = "plasma", transform = "log10")
+    if (nrow(df_map) > 0) {
+      p_map <- ggplot() +
+        geom_sf(data = coastline, fill = "gray80", color = "black") +
+        geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
+        theme_minimal() +
+        labs(
+          title = taxa,
+          x = "Longitude",
+          y = "Latitude",
+          color = paste0(param, " (", unit$Enhet, ")"),
+          size = paste0(param, " (", unit$Enhet, ")")
+        ) +
+        theme(
+          plot.title = element_text(size = 18, face = "bold"),  # Increased title size
+          axis.title = element_text(size = 14),
+          axis.text = element_text(size = 12),
+          panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+        ) +
+        coord_sf(expand = FALSE)
+      
+      # Apply log scale if selected
+      if (log_scale == "log10") {
+        p_map <- p_map + 
+          scale_size_continuous(transform = "log10", range = c(8, 20)) + 
+          scale_color_viridis_c(option = "plasma", transform = "log10")
+      } else {
+        p_map <- p_map + 
+          scale_size_continuous(range = c(8, 20)) + 
+          scale_color_viridis_c(option = "plasma")
+      }
+      
+      p_map
     } else {
-      p_map <- p_map + 
-        scale_size_continuous(range = c(8, 20)) + 
-        scale_color_viridis_c(option = "plasma")
+      showNotification(paste("No valid data for the selected parameter:", param, "and taxa:", taxa), type = "warning")
     }
-    
-    p_map
   })
   
   output$download <- downloadHandler(
     filename = function() { "data.txt" },
     content = function(file) {
-      write_tsv(processed_data(), file, na = "", progress = FALSE)
+      write.table(processed_data(), file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
   )
 }
