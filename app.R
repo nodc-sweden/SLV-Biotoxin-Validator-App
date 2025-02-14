@@ -151,6 +151,11 @@ server <- function(input, output, session) {
     taxa <- taxa_data$taxa
     site_df <- site_df_data()
     
+    # Date issues
+    date_issues <- df %>%
+      filter(is.na(`Provtagningsdatum:`)) %>%
+      nrow()
+    
     # Count coordinate issues
     coord_issues <- df %>%
       filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
@@ -173,8 +178,8 @@ server <- function(input, output, session) {
     
     # Create summary dataframe
     summary_df <- data.frame(
-      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues"),
-      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues), check.names = FALSE
+      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates"),
+      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues), check.names = FALSE
     )
     
     withProgress(message = "Loading data...", value = 0.5, {
