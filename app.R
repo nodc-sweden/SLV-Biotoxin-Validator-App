@@ -61,7 +61,7 @@ ui <- fluidPage(
                    column(6, selectInput("selected_param", "Select Kortnamn_MH:", choices = NULL)),
                    column(6, selectInput("log_scale", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
-                 plotOutput("time_series_plot", height = "800px")
+                 plotOutput("time_series_plot", height = "1000px")
         ),
         tabPanel("Geographical Plot",
                  fluidRow(
@@ -151,6 +151,11 @@ server <- function(input, output, session) {
     taxa <- taxa_data$taxa
     site_df <- site_df_data()
     
+    # Date issues
+    date_issues <- df %>%
+      filter(is.na(`Provtagningsdatum:`)) %>%
+      nrow()
+    
     # Count coordinate issues
     coord_issues <- df %>%
       filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
@@ -173,8 +178,8 @@ server <- function(input, output, session) {
     
     # Create summary dataframe
     summary_df <- data.frame(
-      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues"),
-      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues), check.names = FALSE
+      Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates"),
+      "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues), check.names = FALSE
     )
     
     withProgress(message = "Loading data...", value = 0.5, {
@@ -373,7 +378,7 @@ server <- function(input, output, session) {
     
     # Extract logical columns
     logical_cols <- toxin_list %>%
-      filter(Enhet_MH == "SANT_eller_FALSKT")
+      filter(Enhet_MH == "true or false")
     
     # Rename parameters
     data <- data %>%
@@ -391,7 +396,7 @@ server <- function(input, output, session) {
       q_col <- paste0("Q_", param)
       
       # Ensure the column exists in data
-      if (param %in% names(data)) {
+      if (param %in% names(data) & !param %in% logical_cols$Kortnamn_MH) {
         # Extract the "<" signs into the new column
         data[[q_col]] <- ifelse(grepl("^<\\s*", data[[param]]), "<", NA)
         
@@ -401,6 +406,10 @@ server <- function(input, output, session) {
         data[[param]] <- as.numeric(data[[param]])
       }
     }
+    
+    # Transform logical colunmns
+    data <- data %>%
+      mutate(across(all_of(logical_cols$Kortnamn_MH), ~ as.logical(.)))
     
     # Add taxa info
     data <- data %>% left_join(taxa, by = "Provmärkning")
@@ -478,9 +487,17 @@ server <- function(input, output, session) {
       filter(has_data) %>%
       pull(param)
     
+    # Convert col types
+    df <- type_convert(df, col_types = cols())
+    
     # Ensure the selected parameter exists in valid_params
     if (!(param %in% valid_params)) {
       showNotification(paste("Selected parameter", param, "has no data or doesn't exist."), type = "error")
+      return(NULL)
+    }
+    
+    if (is.logical(df[[param]])) {
+      showNotification("Selected parameter is logical and cannot be plotted.", type = "error")
       return(NULL)
     }
     
@@ -587,8 +604,16 @@ server <- function(input, output, session) {
       filter(has_data) %>%
       pull(param)
     
+    # Convert col types
+    df <- type_convert(df, col_types = cols())
+    
     if (!(param %in% valid_params)) {
       showNotification(paste("Selected parameter", param, "has no data or doesn't exist."), type = "error")
+      return(NULL)
+    }
+    
+    if (is.logical(df[[param]])) {
+      showNotification("Selected parameter is logical and cannot be plotted.", type = "error")
       return(NULL)
     }
     
