@@ -24,8 +24,8 @@ coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet
 
 # Read list of toxins
 toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
-  select(`Rapporterat-parameternamn`, Parameter, Enhet, `Gränsvärde_kommersiell_försäljning`) %>%
-  drop_na(Parameter)
+  select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH, Parameternamn_MH, `Gränsvärde_kommersiell_försäljning`) %>%
+  drop_na(Kortnamn_MH)
 
 # Define UI for application
 ui <- fluidPage(
@@ -34,15 +34,15 @@ ui <- fluidPage(
     sidebarPanel(
       fileInput("file", "Upload Excel File", accept = ".xlsx"),
       downloadButton("download", "Download Processed .txt File"),
-      width = 2
+      width = 3
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Validation Summary",
+        tabPanel("Summary",
                  h4("Issue Summary"),
                  DTOutput("table_summary")
         ),
-        tabPanel("Map Validation", leafletOutput("map", height = "800px")),
+        tabPanel("Map", leafletOutput("map", height = "800px")),
         tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
         tabPanel("Taxa Validation", 
                  h4("Issues Found"),
@@ -58,7 +58,7 @@ ui <- fluidPage(
         ),
         tabPanel("Time Series Plot",
                  fluidRow(
-                   column(6, selectInput("selected_param", "Select Parameter:", choices = NULL)),
+                   column(6, selectInput("selected_param", "Select Kortnamn_MH:", choices = NULL)),
                    column(6, selectInput("log_scale", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("time_series_plot", height = "800px")
@@ -66,7 +66,7 @@ ui <- fluidPage(
         tabPanel("Geographical Plot",
                  fluidRow(
                    column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
-                   column(4, selectInput("selected_param_map", "Select Parameter:", choices = NULL)),
+                   column(4, selectInput("selected_param_map", "Select Kortnamn_MH:", choices = NULL)),
                    column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                  ),
                  plotOutput("spatial_plot", height = "800px")
@@ -312,7 +312,7 @@ server <- function(input, output, session) {
       filter(is.na(`SLV Area`)) %>%
       arrange(`SLV Area Number`)
     
-    datatable(locations, options = list(pageLength = 50, 
+    datatable(locations, options = list(pageLength = 25, 
                                         language = list(emptyTable = "No issues found"),
                                         rowCallback = JS(
                                           "function(row, data) { 
@@ -366,14 +366,14 @@ server <- function(input, output, session) {
     taxa <- taxa_data$taxa
     
     # Create a named vector for renaming
-    rename_map <- setNames(toxin_list$Parameter, toxin_list$`Rapporterat-parameternamn`)
+    rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
     
     # Only remap existing colnames
     rename_map <- rename_map[names(rename_map) %in% names(data)]
     
     # Extract logical columns
     logical_cols <- toxin_list %>%
-      filter(Enhet == "SANT_eller_FALSKT")
+      filter(Enhet_MH == "SANT_eller_FALSKT")
     
     # Rename parameters
     data <- data %>%
@@ -386,7 +386,7 @@ server <- function(input, output, session) {
       rename_with(~ rename_map[.x], .cols = all_of(names(rename_map)))
     
     # Loop through each parameter in toxin_list
-    for (param in toxin_list$Parameter) {
+    for (param in toxin_list$Kortnamn_MH) {
       # Create the new Q column name
       q_col <- paste0("Q_", param)
       
@@ -449,16 +449,17 @@ server <- function(input, output, session) {
   # Update dropdown choices dynamically based on toxin_list
   observe({
     req(processed_data())
-    processed_df <- processed_data()
+    processed <- processed_data() %>%
+      select(where(~ !all(is.na(.))))
     
     toxin_choices <- toxin_list %>%
-      filter(Parameter %in% names(processed_df))
+      filter(Kortnamn_MH %in% names(processed))
     
-    taxa_choices <- sort(unique(processed_df$LATNM))
+    taxa_choices <- sort(unique(processed$LATNM))
     
     updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
-    updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Parameter))
-    updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Parameter))
+    updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Kortnamn_MH))
+    updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Kortnamn_MH))
   })
   
   # Generate time series plot
@@ -499,13 +500,18 @@ server <- function(input, output, session) {
     
     # Get threshold values
     thresholds <- toxin_list %>%
-      filter(Parameter == param) %>%
+      filter(Kortnamn_MH == param) %>%
       select(Gränsvärde_kommersiell_försäljning)
     
     # Get unit
     unit <- toxin_list %>%
-      filter(Parameter == param) %>%
-      select(Enhet)
+      filter(Kortnamn_MH == param) %>%
+      select(Enhet_MH)
+    
+    # Get toxin name
+    toxin <- toxin_list %>%
+      filter(Kortnamn_MH == param) %>%
+      select(Parameternamn_MH)
     
     # Create plot only if df_param has rows
     if (nrow(df_param) > 0) {
@@ -518,7 +524,7 @@ server <- function(input, output, session) {
                            name = "Detection Limit") +
         scale_y_continuous(limits = c(0, NA)) +
         facet_wrap(~ LATNM, ncol = 1) +
-        labs(x = "", y = paste0(param, " (", unit$Enhet, ")")) +
+        labs(x = "", y = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")")) +
         theme_minimal() +
         
         # Only add threshold line if it is not NA
@@ -565,8 +571,13 @@ server <- function(input, output, session) {
     
     # Get unit
     unit <- toxin_list %>%
-      filter(Parameter == param) %>%
-      select(Enhet)
+      filter(Kortnamn_MH == param) %>%
+      select(Enhet_MH)
+    
+    # Get toxin name
+    toxin <- toxin_list %>%
+      filter(Kortnamn_MH == param) %>%
+      select(Parameternamn_MH)
     
     # Ensure the selected parameter exists and has data
     valid_params <- df %>%
@@ -610,8 +621,8 @@ server <- function(input, output, session) {
           title = taxa,
           x = "Longitude",
           y = "Latitude",
-          color = paste0(param, " (", unit$Enhet, ")"),
-          size = paste0(param, " (", unit$Enhet, ")")
+          color = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")"),
+          size = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")")
         ) +
         theme(
           plot.title = element_text(size = 18, face = "bold"),  # Increased title size
