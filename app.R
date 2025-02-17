@@ -47,6 +47,9 @@
     sidebarLayout(
       sidebarPanel(
         fileInput("file", "Upload Excel File", accept = ".xlsx"),
+        selectInput("sample_type", "Sample Type:", 
+                    choices = c("Animal flesh" = "organisms", "Water" = "watersample"), 
+                    selected = "organisms"),
         downloadButton("download", "Download Processed .txt File"),
         width = 3
       ),
@@ -210,8 +213,10 @@
         ) %>%
         mutate(across(everything(), as.character))
       
-      template <- read_excel("config/Format_Marine_Biotoxin.xlsx",
-                             skip = 2, progress = FALSE)[-1]
+      # Select file based on sample type
+      file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
+      
+      template <- read_excel(file_to_use, skip = 2, progress = FALSE)[-1]
       
       template_headers <- template[0,] %>%
         mutate(across(everything(), as.character))
@@ -246,7 +251,7 @@
       # Now match the problem_columns with the reverse map
       renamed_columns <- as.character(renamed_columns)
       
-      missing_columns <- data_frame("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
+      missing_columns <- tibble("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
       
       units <- toxin_list %>%
         select(Kortnamn_MH, Enhet_MH) %>%
