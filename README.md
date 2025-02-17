@@ -18,11 +18,12 @@ data are downloaded in a format suitable for the [SHARK](https://shark.smhi.se/)
 - **Download Processed Data:** Export validated data as a text file for [SHARK](https://shark.smhi.se/).
 
 ## Installation
-To run the app locally, ensure that you have R and the necessary libraries installed.
+To run the app locally, clone this repo and ensure that you have R and the necessary libraries installed.
 
-### Required R Packages
+### Install Required R Packages
 ```r
-install.packages(c("shiny", "tidyverse", "readxl", "sf", "leaflet", "worrms", "DT"))
+if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+remotes::install_deps()
 ```
 
 ### Running the App

@@ -55,7 +55,7 @@
           tabPanel("Summary",
                    h4("Issue Summary"),
                    DTOutput("table_summary"),
-                   h4("Unused Columns"),
+                   h4("Unknown Columns"),
                    DTOutput("unmapped_data")
           ),
           tabPanel("Map", leafletOutput("map", height = "800px")),
@@ -246,7 +246,7 @@
       # Now match the problem_columns with the reverse map
       renamed_columns <- as.character(renamed_columns)
       
-      missing_columns <- data_frame("Unknown column" = renamed_columns, "Column key" = problem_columns)
+      missing_columns <- data_frame("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
       
       units <- toxin_list %>%
         select(Kortnamn_MH, Enhet_MH) %>%
@@ -255,7 +255,7 @@
       missing_columns <- missing_columns %>%
         left_join(units, by = c("Column key" = "Kortnamn_MH"))
       
-      return(list(data = data_out, unmatched_columns = unmatched_columns_reactive, renamed_columns = missing_columns))
+      return(list(data = data_out, renamed_columns = missing_columns))
     })
     
     # Create a reactiveValues object to store taxa
@@ -548,7 +548,7 @@
       }
       
       if (is.logical(df[[param]])) {
-        showNotification("Selected parameter is logical and cannot be plotted.", type = "error")
+        showNotification("Selected parameter is logical (TRUE/FALSE) and cannot be plotted.", type = "error")
         return(NULL)
       }
       
@@ -664,7 +664,7 @@
       }
       
       if (is.logical(df[[param]])) {
-        showNotification("Selected parameter is logical and cannot be plotted.", type = "error")
+        showNotification("Selected parameter is logical (TRUE/FALSE) and cannot be plotted.", type = "error")
         return(NULL)
       }
       
