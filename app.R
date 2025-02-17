@@ -24,7 +24,7 @@
   
   # Read list of toxins
   toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
-    select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH, Parameternamn_MH, `Gränsvärde_kommersiell_försäljning`) %>%
+    select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH_kg, Enhet_MH_l, Parameternamn_MH, `Gränsvärde_kommersiell_försäljning`) %>%
     drop_na(Kortnamn_MH)
   
   # Map Metadata headers to the correct column names
@@ -144,6 +144,9 @@
       # Use the stored `taxa` for joining
       taxa <- taxa_data$taxa
       
+      # Define which unit column to use (e.g., based on input or condition)
+      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
+      
       # Create a named vector for renaming
       rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
       
@@ -152,7 +155,7 @@
       
       # Extract logical columns
       logical_cols <- toxin_list %>%
-        filter(Enhet_MH == "true or false")
+        filter(Enhet_MH_kg == "true or false")
       
       data_renamed <- data %>%
         rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
@@ -253,9 +256,10 @@
       
       missing_columns <- tibble("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
       
+      # Use dynamically selected unit column
       units <- toxin_list %>%
-        select(Kortnamn_MH, Enhet_MH) %>%
-        rename(Unit = Enhet_MH)
+        select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
+        rename(Unit = !!sym(selected_unit_column))
       
       missing_columns <- missing_columns %>%
         left_join(units, by = c("Column key" = "Kortnamn_MH"))
@@ -534,6 +538,7 @@
       df <- processed_data()$data
       param <- input$selected_param
       log_scale <- input$log_scale
+      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
       
       # Identify valid parameters that contain data
       valid_params <- df %>%
@@ -579,7 +584,8 @@
       # Get unit
       unit <- toxin_list %>%
         filter(Kortnamn_MH == param) %>%
-        select(Enhet_MH)
+        select(!!sym(selected_unit_column)) %>%
+        rename(Unit = !!sym(selected_unit_column))
       
       # Get toxin name
       toxin <- toxin_list %>%
@@ -597,7 +603,7 @@
                              name = "Detection Limit") +
           scale_y_continuous(limits = c(0, NA)) +
           facet_wrap(~ LATNM, ncol = 1) +
-          labs(x = "", y = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")")) +
+          labs(x = "", y = paste0(toxin$Parameternamn_MH, " (", unit$Unit, ")")) +
           theme_minimal() +
           
           # Only add threshold line if it is not NA
@@ -641,11 +647,13 @@
       param <- input$selected_param_map
       log_scale <- input$log_scale_map
       taxa <- input$selected_taxa
+      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
       
       # Get unit
       unit <- toxin_list %>%
         filter(Kortnamn_MH == param) %>%
-        select(Enhet_MH)
+        select(!!sym(selected_unit_column)) %>%
+        rename(Unit = !!sym(selected_unit_column))
       
       # Get toxin name
       toxin <- toxin_list %>%
@@ -702,8 +710,8 @@
             title = taxa,
             x = "Longitude",
             y = "Latitude",
-            color = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")"),
-            size = paste0(toxin$Parameternamn_MH, " (", unit$Enhet_MH, ")")
+            color = paste0(toxin$Parameternamn_MH, " (", unit$Unit, ")"),
+            size = paste0(toxin$Parameternamn_MH, " (", unit$Unit, ")")
           ) +
           theme(
             plot.title = element_text(size = 18, face = "bold"),  # Increased title size
