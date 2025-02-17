@@ -1,7 +1,7 @@
 # SLV Marine Biotoxin Data Validation App
 
 ## Overview
-This [Shiny application](https://anderstorstensson.shinyapps.io/slv-biotoxin-validator-app/) validates marine biotoxin data from the Swedish Food Agency (SLV). 
+This [Shiny application](https://nodc-sweden.shinyapps.io/biotoxin-validator/) validates marine biotoxin data from the Swedish Food Agency (SLV). 
 It allows users to upload Excel files containing detailed sampling data, verify geographic coordinates, 
 validate taxonomic names, and visualize data through interactive maps and plots. After validation,
 data are downloaded in a format suitable for the [SHARK](https://shark.smhi.se/) database.
@@ -56,7 +56,7 @@ This Shiny app uses three configuration files to ensure that toxins, production 
 - **`config/production_areas.xlsx`** – Provides metadata for each production area.
 
 ## Deployment to Shinyapps.io
-This repository is automatically deployed as a Shinyapps.io [web application](https://anderstorstensson.shinyapps.io/slv-biotoxin-validator-app/) on every push to the `main` branch through GitHub Actions.
+This repository is automatically deployed as a Shinyapps.io [web application](https://nodc-sweden.shinyapps.io/biotoxin-validator/) on every push to the `main` branch through GitHub Actions.
 
 ## License
 This project is licensed under the MIT License.
