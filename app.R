@@ -77,7 +77,7 @@
           ),
           tabPanel("Time Series Plot",
                    fluidRow(
-                     column(6, selectInput("selected_param", "Select Kortnamn_MH:", choices = NULL)),
+                     column(6, selectInput("selected_param", "Select Toxin:", choices = NULL)),
                      column(6, selectInput("log_scale", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                    ),
                    plotOutput("time_series_plot", height = "1000px")
@@ -85,7 +85,7 @@
           tabPanel("Geographical Plot",
                    fluidRow(
                      column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
-                     column(4, selectInput("selected_param_map", "Select Kortnamn_MH:", choices = NULL)),
+                     column(4, selectInput("selected_param_map", "Select Toxin:", choices = NULL)),
                      column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                    ),
                    plotOutput("spatial_plot", height = "800px")
