@@ -407,7 +407,7 @@
       
       # Create summary dataframe
       summary_df <- data.frame(
-        Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates", "Origin Issues"),
+        Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates", "Origin Issues (Wild/Cultured)"),
         "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues, origin_issues), check.names = FALSE
       )
       
