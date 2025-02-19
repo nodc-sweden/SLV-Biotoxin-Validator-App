@@ -76,6 +76,7 @@
                    h4("Valid Entries"),
                    DTOutput("table_sites_valid")
           ),
+          tabPanel("Origin Validation", h4("Issues Found"), DTOutput("table_origin")),
           tabPanel("Time Series Plot",
                    fluidRow(
                      column(6, selectInput("selected_param", "Select Toxin:", choices = NULL)),
@@ -91,7 +92,6 @@
                    ),
                    plotOutput("spatial_plot", height = "800px")
           ),
-          tabPanel("Origin Validation", h4("Issues Found"), DTOutput("table_origin")),
           tabPanel("Original Data", DTOutput("table_raw")),
           tabPanel("About",
                    fluidRow(
