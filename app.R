@@ -609,8 +609,8 @@
       taxa_choices <- sort(unique(processed$LATNM))
       
       updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
-      updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Kortnamn_MH))
-      updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Kortnamn_MH))
+      updateSelectInput(session, "selected_param", choices = toxin_choices$Kortnamn_MH)
+      updateSelectInput(session, "selected_param_map", choices = toxin_choices$Kortnamn_MH)
     })
     
     # Generate time series plot
