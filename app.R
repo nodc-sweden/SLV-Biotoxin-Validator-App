@@ -599,7 +599,7 @@
                                          as.character(str_detect(!!sym(q_col), "<")))), 
                      na.rm = TRUE, size = 3) +
           scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), 
-                             labels = c("FALSE" = "Above LOD", "TRUE" = "Below LOD"), 
+                             labels = c("FALSE" = "Above LOQ", "TRUE" = "Below LOQ"), 
                              name = "Detection Limit") +
           scale_y_continuous(limits = c(0, NA)) +
           facet_wrap(~ LATNM, ncol = 1) +
