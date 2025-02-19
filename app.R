@@ -46,7 +46,8 @@
     titlePanel("SLV Marine Biotoxin Data Validation"),
     sidebarLayout(
       sidebarPanel(
-        fileInput("file", "Upload Excel File", accept = ".xlsx"),
+        fileInput("file", "Upload Eurofins Excel File", accept = ".xlsx"),
+        fileInput("file_summary", "Upload Summary Excel File", accept = ".xlsx"),
         selectInput("sample_type", "Sample Type:", 
                     choices = c("Animal flesh" = "organisms", "Water" = "watersample"), 
                     selected = "organisms"),
@@ -75,9 +76,10 @@
                    h4("Valid Entries"),
                    DTOutput("table_sites_valid")
           ),
+          tabPanel("Origin Validation", h4("Issues Found"), DTOutput("table_origin")),
           tabPanel("Time Series Plot",
                    fluidRow(
-                     column(6, selectInput("selected_param", "Select Kortnamn_MH:", choices = NULL)),
+                     column(6, selectInput("selected_param", "Select Toxin:", choices = NULL)),
                      column(6, selectInput("log_scale", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                    ),
                    plotOutput("time_series_plot", height = "1000px")
@@ -85,7 +87,7 @@
           tabPanel("Geographical Plot",
                    fluidRow(
                      column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
-                     column(4, selectInput("selected_param_map", "Select Kortnamn_MH:", choices = NULL)),
+                     column(4, selectInput("selected_param_map", "Select Toxin:", choices = NULL)),
                      column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
                    ),
                    plotOutput("spatial_plot", height = "800px")
@@ -99,6 +101,7 @@
                             p("Instructions:"),
                             tags$ul(
                               tags$li("Upload and validate biotoxin data from Excel files, following the export format from Eurofins."),
+                              tags$li("Upload a summary Excel files, containing information on Origin (Wild/Culutured). Required columns are År, Mån, Dat, Nr, Art and V/O."),
                               tags$li("Visualize sampling locations on an interactive map."),
                               tags$li("Check for missing or incorrect coordinates. Data in red color will require action before data submission to SHARK, orange may need attention."),
                               tags$li("Validate taxonomic names using the World Register of Marine Species (WoRMS). Data in red color require action."),
@@ -136,10 +139,77 @@
       return(df)
     })
     
+    data_summary <- reactive({
+      req(input$file_summary)
+      # Read file
+      df <- read_excel(input$file_summary$datapath, .name_repair = "none", progress = FALSE)
+      
+      # Define required column names
+      required_cols <- c("År", "Mån", "Dat", "Nr", "Art", "V/O")
+      
+      # Check if all required columns exist
+      missing_cols <- setdiff(required_cols, colnames(df))
+      
+      if (length(missing_cols) > 0) {
+        showNotification(paste("The uploaded file is missing the following required columns:", 
+                               paste(missing_cols, collapse = ", ")), type = "error", duration = 5)
+        return(NULL)  # Stop further execution
+      }
+      
+      # Process dataframe
+      df <- df %>%
+        mutate(SDATE = as.character(make_date(year = År, month = Mån, day = Dat))) %>%
+        select(SDATE, Nr, Art, `V/O`) %>%
+        filter(complete.cases(.))
+      
+      taxa <- df %>% select(Art) %>% distinct()
+      taxa_names <- taxa$Art
+      records <- NULL
+      
+      for (i in seq_along(taxa_names)) {
+        record <- tryCatch(
+          cbind(Art = taxa_names[i], wm_records_name(taxa_names[i], fuzzy = FALSE)),
+          error = function(e) return(NULL)
+        )
+        records <- bind_rows(records, record)
+      }
+      
+      summary <- df %>%
+        left_join(records, by = "Art") %>%
+        select(Nr, SDATE, `V/O`, scientificname) %>%
+        rename(LATNM = scientificname,
+               Ursprung = `V/O`,
+               `SLV produktionsområdesrådesnummer` = Nr) %>%
+        mutate(Ursprung = str_to_sentence(Ursprung),
+               `SLV produktionsområdesrådesnummer` = as.character(`SLV produktionsområdesrådesnummer`)) %>%
+        distinct() %>%
+        group_by(`SLV produktionsområdesrådesnummer`, SDATE, LATNM) %>%
+        filter(n_distinct(Ursprung) == 1) %>%  # Keep only groups with one unique Ursprung
+        ungroup()
+      
+      problems <- df %>%
+        group_by(Nr, SDATE, Art) %>%
+        summarize(n_origins = n_distinct(`V/O`), .groups = "drop") %>%
+        filter(n_origins > 1)
+      
+      problem_rows <- df %>%
+        semi_join(problems, by = c("Nr", "SDATE", "Art")) %>%
+        rename(Date = SDATE)
+      
+      return(list(summary = summary, problems = problem_rows))
+    })
+    
     processed_data <- reactive({
       site_df <- site_df_data()  # Get the site_df from the reactive object
       
       data <- data()
+      
+      # Check if file_summary has been uploaded
+      if (!is.null(input$file_summary)) {
+        data_summary <- data_summary()$summary
+      } else {
+        data_summary <- NULL
+      }
       
       # Use the stored `taxa` for joining
       taxa <- taxa_data$taxa
@@ -215,6 +285,12 @@
           MYEAR = lubridate::year(SDATE)
         ) %>%
         mutate(across(everything(), as.character))
+      
+      # Only join data_summary if file_summary exists
+      if (!is.null(data_summary)) {
+        data_mapped <- data_mapped %>%
+          left_join(data_summary, by = c("SDATE", "LATNM", "SLV produktionsområdesrådesnummer"), relationship = "many-to-many")
+      }
       
       # Select file based on sample type
       file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
@@ -297,6 +373,7 @@
       df <- data()
       taxa <- taxa_data$taxa
       site_df <- site_df_data()
+      processed_df <- processed_data()$data
       
       # Date issues
       date_issues <- df %>%
@@ -314,6 +391,11 @@
         filter(is.na(scientificname)) %>%
         nrow()
       
+      # Count origin validation issues
+      origin_issues <- processed_df %>%
+        filter(is.na(Ursprung)) %>%
+        nrow()
+      
       # Add the final output
       df$`SLV produktionssområde` <- site_df$Produktionssområde
       df$`SLV produktionsområdesrådesnummer` <- site_df$number
@@ -325,8 +407,8 @@
       
       # Create summary dataframe
       summary_df <- data.frame(
-        Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates"),
-        "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues), check.names = FALSE
+        Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates", "Origin Issues (Wild/Cultured)"),
+        "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues, origin_issues), check.names = FALSE
       )
       
       withProgress(message = "Loading data...", value = 0.5, {
@@ -527,8 +609,8 @@
       taxa_choices <- sort(unique(processed$LATNM))
       
       updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
-      updateSelectInput(session, "selected_param", choices = sort(toxin_choices$Kortnamn_MH))
-      updateSelectInput(session, "selected_param_map", choices = sort(toxin_choices$Kortnamn_MH))
+      updateSelectInput(session, "selected_param", choices = toxin_choices$Kortnamn_MH)
+      updateSelectInput(session, "selected_param_map", choices = toxin_choices$Kortnamn_MH)
     })
     
     # Generate time series plot
@@ -599,7 +681,7 @@
                                          as.character(str_detect(!!sym(q_col), "<")))), 
                      na.rm = TRUE, size = 3) +
           scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), 
-                             labels = c("FALSE" = "Above LOD", "TRUE" = "Below LOD"), 
+                             labels = c("FALSE" = "Above LOQ", "TRUE" = "Below LOQ"), 
                              name = "Detection Limit") +
           scale_y_continuous(limits = c(0, NA)) +
           facet_wrap(~ LATNM, ncol = 1) +
@@ -736,6 +818,16 @@
       } else {
         showNotification(paste("No valid data for the selected parameter:", param, "and taxa:", taxa), type = "warning")
       }
+    })
+    
+    output$table_origin <- renderDT({
+      validate(need(input$file_summary, "Waiting for file upload..."))
+      
+      datatable(data_summary()$problems, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+        "function(row, data) { 
+        $(row).css('color', 'red'); 
+      }"
+      )))
     })
     
     output$download <- downloadHandler(
