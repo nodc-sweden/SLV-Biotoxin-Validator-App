@@ -49,8 +49,8 @@
         fileInput("file", "Upload Eurofins Excel File", accept = ".xlsx"),
         fileInput("file_summary", "Upload Summary Excel File", accept = ".xlsx"),
         selectInput("sample_type", "Sample Type:", 
-                    choices = c("Animal flesh" = "organisms", "Water" = "watersample"), 
-                    selected = "organisms"),
+                    choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
+                    selected = "live_bivalve_molluscs_v2"),
         downloadButton("download", "Download Processed .txt File"),
         width = 3
       ),
@@ -178,13 +178,13 @@
         left_join(records, by = "Art") %>%
         select(Nr, SDATE, `V/O`, scientificname) %>%
         rename(LATNM = scientificname,
-               Ursprung = `V/O`,
-               `SLV produktionsområdesrådesnummer` = Nr) %>%
-        mutate(Ursprung = str_to_sentence(Ursprung),
-               `SLV produktionsområdesrådesnummer` = as.character(`SLV produktionsområdesrådesnummer`)) %>%
+               SAMPLE_ORIGIN = `V/O`,
+               PROD_AREA_ID = Nr) %>%
+        mutate(SAMPLE_ORIGIN = str_to_sentence(SAMPLE_ORIGIN),
+               PROD_AREA_ID = as.character(PROD_AREA_ID)) %>%
         distinct() %>%
-        group_by(`SLV produktionsområdesrådesnummer`, SDATE, LATNM) %>%
-        filter(n_distinct(Ursprung) == 1) %>%  # Keep only groups with one unique Ursprung
+        group_by(PROD_AREA_ID, SDATE, LATNM) %>%
+        filter(n_distinct(SAMPLE_ORIGIN) == 1) %>%  # Keep only groups with one unique SAMPLE_ORIGIN
         ungroup()
       
       problems <- df %>%
@@ -200,6 +200,7 @@
     })
     
     processed_data <- reactive({
+
       site_df <- site_df_data()  # Get the site_df from the reactive object
       
       data <- data()
@@ -215,7 +216,7 @@
       taxa <- taxa_data$taxa
       
       # Define which unit column to use (e.g., based on input or condition)
-      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
+      selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
       
       # Create a named vector for renaming
       rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
@@ -266,13 +267,13 @@
       data <- data %>% left_join(taxa, by = "Provmärkning")
       
       # Add site info
-      data$`SLV produktionssområde` <- site_df$Produktionssområde
-      data$`SLV produktionsområdesrådesnummer` <- site_df$number
+      data$PROD_AREA <- site_df$Produktionssområde
+      data$PROD_AREA_ID <- site_df$number
       
       areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
       
       data <- data %>%
-        left_join(areas, by = c("SLV produktionsområdesrådesnummer" = "Nummer"))
+        left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
       
       taxa <- data %>% select(Provmärkning) %>% distinct()
       
@@ -289,7 +290,7 @@
       # Only join data_summary if file_summary exists
       if (!is.null(data_summary)) {
         data_mapped <- data_mapped %>%
-          left_join(data_summary, by = c("SDATE", "LATNM", "SLV produktionsområdesrådesnummer"), relationship = "many-to-many")
+          left_join(data_summary, by = c("SDATE", "LATNM", "PROD_AREA_ID"), relationship = "many-to-many")
       }
       
       # Select file based on sample type
@@ -393,16 +394,16 @@
       
       # Count origin validation issues
       origin_issues <- processed_df %>%
-        filter(is.na(Ursprung)) %>%
+        filter(is.na(SAMPLE_ORIGIN)) %>%
         nrow()
       
       # Add the final output
-      df$`SLV produktionssområde` <- site_df$Produktionssområde
-      df$`SLV produktionsområdesrådesnummer` <- site_df$number
+      df$PROD_AREA <- site_df$Produktionssområde
+      df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
       site_issues <- df %>%   
-        filter(is.na(`SLV produktionsområdesrådesnummer`)) %>%
+        filter(is.na(PROD_AREA_ID)) %>%
         nrow()
       
       # Create summary dataframe
@@ -526,6 +527,7 @@
       # Remove potential noise
       site_df$site <- gsub("/", "", site_df$site)
       site_df$site <- trimws(site_df$site)
+      site_df$number <- as.character(site_df$number)
       
       site_df <- site_df %>% left_join(areas, by = c("number" = "Nummer"))
       
@@ -539,16 +541,16 @@
       df <- data()
       
       # Add the final output
-      df$`SLV produktionssområde` <- site_df$Produktionssområde
-      df$`SLV produktionsområdesrådesnummer` <- site_df$number
+      df$PROD_AREA <- site_df$Produktionssområde
+      df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
       locations <- df %>%   
-        group_by(`Provtagningsplats:`, `SLV produktionsområdesrådesnummer`, `SLV produktionssområde`) %>%
+        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV produktionssområde`) %>%
         summarise(`N visits` = n(), .groups = "drop") %>%
         rename(`Reported Site` = `Provtagningsplats:`,
                `SLV Area` = `SLV produktionssområde`,
-               `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+               `SLV Area Number` = PROD_AREA_ID) %>%
         filter(is.na(`SLV Area`)) %>%
         arrange(`SLV Area Number`)
       
@@ -573,15 +575,15 @@
       
       # Add the final output
       df$`SLV produktionssområde` <- site_df$Produktionssområde
-      df$`SLV produktionsområdesrådesnummer` <- site_df$number
+      df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
       locations <- df %>%   
-        group_by(`Provtagningsplats:`, `SLV produktionsområdesrådesnummer`, `SLV produktionssområde`) %>%
+        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV produktionssområde`) %>%
         summarise(`N visits` = n(), .groups = "drop") %>%
         rename(`Reported Site` = `Provtagningsplats:`,
                `SLV Area` = `SLV produktionssområde`,
-               `SLV Area Number` = `SLV produktionsområdesrådesnummer`) %>%
+               `SLV Area Number` = PROD_AREA_ID) %>%
         filter(!is.na(`SLV Area`)) %>%
         arrange(`SLV Area Number`)
       
@@ -620,7 +622,7 @@
       df <- processed_data()$data
       param <- input$selected_param
       log_scale <- input$log_scale
-      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
+      selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
       
       # Identify valid parameters that contain data
       valid_params <- df %>%
@@ -729,7 +731,7 @@
       param <- input$selected_param_map
       log_scale <- input$log_scale_map
       taxa <- input$selected_taxa
-      selected_unit_column <- if (input$sample_type == "organisms") "Enhet_MH_kg" else "Enhet_MH_l"
+      selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
       
       # Get unit
       unit <- toxin_list %>%
