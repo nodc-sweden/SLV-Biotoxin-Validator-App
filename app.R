@@ -48,6 +48,9 @@
       sidebarPanel(
         fileInput("file", "Upload Eurofins Excel File", accept = ".xlsx"),
         fileInput("file_summary", "Upload Summary Excel File", accept = ".xlsx"),
+        selectInput("coordinate_output", "Coordinate output:", 
+                    choices = c("GPS" = "actual", "Midpoint Production Area" = "midpoint"), 
+                    selected = "midpoint"),
         selectInput("sample_type", "Sample Type:", 
                     choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
                     selected = "live_bivalve_molluscs_v2"),
@@ -120,7 +123,7 @@
   # Define server logic
   server <- function(input, output, session) {
     data <- reactive({
-      req(input$file)
+      req(input$file, site_df_data())
       df <- read_excel(input$file$datapath, skip = 1, .name_repair = "none", progress = FALSE)
       header <- names(read_excel(input$file$datapath, .name_repair = "none", progress = FALSE))
       colnames(df)[colnames(df) == ""] <- header[colnames(df) == ""]
@@ -129,13 +132,56 @@
         mutate(
           LATIT = convert_ddmm_to_dd(substr(.[[coordinate_column]], 1, 6)),
           LONGI = convert_ddmm_to_dd(substr(.[[coordinate_column]], 8, 13))
-        ) %>%
+        )
+      
+      if (input$coordinate_output == "midpoint") {
+        site_df <- site_df_data()
+        
+        # Add site info
+        df$PROD_AREA <- site_df$Produktionsområde
+        df$PROD_AREA_ID <- site_df$number
+        df$Mittpunkt_E_SWEREF99 <- site_df$Mittpunkt_E_SWEREF99
+        df$Mittpunkt_N_SWEREF99 <- site_df$Mittpunkt_N_SWEREF99
+        
+        # Drop old decimal-degree columns if they exist (won't error if they don't)
+        df <- df %>%
+          select(-any_of(c("LATIT", "LONGI")))
+        
+        # Which rows have valid SWEREF99 TM coords?
+        idx <- which(!is.na(df$Mittpunkt_E_SWEREF99) &
+                       !is.na(data_mapped$Mittpunkt_N_SWEREF99))
+        
+        # Pre-allocate output vectors (NA where coords are missing)
+        LONGI <- rep(NA_real_, nrow(df))
+        LATIT <- rep(NA_real_, nrow(df))
+        
+        # Transform only valid rows
+        if (length(idx) > 0) {
+          pts <- st_as_sf(
+            df[idx, ],
+            coords = c("Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99"),
+            crs = 3006             # SWEREF99 TM
+          ) %>%
+            st_transform(4326)      # WGS84 decimal degrees
+          
+          xy <- st_coordinates(pts) # X = lon, Y = lat
+          LONGI[idx] <- xy[, 1]
+          LATIT[idx] <- xy[, 2]
+        }
+        
+        # Attach back to your data
+        df$LONGI <- LONGI
+        df$LATIT <- LATIT
+      }
+      
+      df <- df %>%
         mutate(on_land = ifcb_is_near_land(
           LATIT, 
           LONGI, 
           shape = "data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp",
           distance = -10)
         )
+      
       return(df)
     })
     
@@ -267,7 +313,7 @@
       data <- data %>% left_join(taxa, by = "Provmärkning")
       
       # Add site info
-      data$PROD_AREA <- site_df$Produktionssområde
+      data$PROD_AREA <- site_df$Produktionsområde
       data$PROD_AREA_ID <- site_df$number
       
       areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
@@ -292,7 +338,7 @@
         data_mapped <- data_mapped %>%
           left_join(data_summary, by = c("SDATE", "LATNM", "PROD_AREA_ID"), relationship = "many-to-many")
       }
-      
+
       # Select file based on sample type
       file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
       
@@ -304,13 +350,33 @@
       data_out <- template_headers %>%
         bind_rows(data_mapped %>% select(any_of(names(template_headers))))
       
+      data_out <- data_out %>%
+        mutate(
+          POSYS = case_when(
+            !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output == "midpoint" ~ "Middle of production area",
+            !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output != "midpoint" ~ "GPS",
+            TRUE ~ NA_character_
+          ),
+          COMNT_VISIT = case_when(
+            !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output == "midpoint" ~ "The given position is a nominal point set at the center of the production area. Data is collected from the entire area, and the coordinate uncertainty reflects the extent of this area.",
+            !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output != "midpoint" ~ NA,
+            TRUE ~ NA_character_
+          ),
+          SMTYP = "HAN",
+          SAMPLE_ORIGIN = recode(SAMPLE_ORIGIN,
+                                 "Vilda" = "Wild",
+                                 "Odlade" = "Farmed",
+                                 .default = SAMPLE_ORIGIN,
+                                 .missing = SAMPLE_ORIGIN)
+        )
+      
       data_validation <- data_out %>%
         select(where(~ !all(is.na(.))))
       
       problem_columns <- names(data_renamed)[!names(data_renamed) %in% names(data_validation)]
       
       # Identify columns that could not be renamed
-      problem_columns <- problem_columns[!problem_columns %in% c("LATIT", "LONGI", "on_land")]
+      problem_columns <- problem_columns[!problem_columns %in% c("LATIT", "LONGI", "on_land", "Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99")]
       problem_columns <- problem_columns[!problem_columns %in% column_mapping]
       problem_columns <- problem_columns[!problem_columns %in% coordinate_column]
       problem_columns <- problem_columns[!problem_columns %in% site_column]
@@ -398,7 +464,7 @@
         nrow()
       
       # Add the final output
-      df$PROD_AREA <- site_df$Produktionssområde
+      df$PROD_AREA <- site_df$Produktionsområde
       df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
@@ -460,12 +526,25 @@
     output$table_missing <- renderDT({
       validate(need(input$file, "Waiting for file upload..."))
       df_missing <- data() %>%
-        filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
-        select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
-        rename(`Reported Site` = `Provtagningsplats:`,
-               Date = `Provtagningsdatum:`,
-               `GPS-coord` = `GPS-koord.`,
-               `On land` = on_land)
+        filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI))
+      
+      if (input$coordinate_output == "midpoint") {
+        df_missing <- df_missing %>%
+          mutate(midoint = paste(LATIT, LONGI, sep = ", ")) %>%
+          select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, midoint, on_land) %>%
+          rename(`Reported Site` = `Provtagningsplats:`,
+                 Date = `Provtagningsdatum:`,
+                 `GPS-coord` = `GPS-koord.`,
+                 `Midpoint coordinate` = midoint,
+                 `On land` = on_land)
+      } else {
+        df_missing <- df_missing %>%
+          select(`Provtagningsplats:`, `Provtagningsdatum:`, `GPS-koord.`, on_land) %>%
+          rename(`Reported Site` = `Provtagningsplats:`,
+                 Date = `Provtagningsdatum:`,
+                 `GPS-coord` = `GPS-koord.`,
+                 `On land` = on_land)
+      }
       
       datatable(df_missing, options = list(
         pageLength = 25, 
@@ -517,7 +596,11 @@
       validate(need(input$file, "Waiting for file upload..."))
       areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
       
-      df <- data()
+      # Just read enough of the uploaded file to extract sites
+      df <- read_excel(input$file$datapath, skip = 1, .name_repair = "none", progress = FALSE)
+      header <- names(read_excel(input$file$datapath, .name_repair = "none", progress = FALSE))
+      colnames(df)[colnames(df) == ""] <- header[colnames(df) == ""]
+      
       # Apply the function to each entry in the data frame
       result <- sapply(df$`Provtagningsplats:`, extract_site_and_number, simplify = FALSE)
       
@@ -541,15 +624,15 @@
       df <- data()
       
       # Add the final output
-      df$PROD_AREA <- site_df$Produktionssområde
+      df$`SLV Produktionsområde` <- site_df$Produktionsområde
       df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
       locations <- df %>%   
-        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV produktionssområde`) %>%
+        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV Produktionsområde`) %>%
         summarise(`N visits` = n(), .groups = "drop") %>%
         rename(`Reported Site` = `Provtagningsplats:`,
-               `SLV Area` = `SLV produktionssområde`,
+               `SLV Area` = `SLV Produktionsområde`,
                `SLV Area Number` = PROD_AREA_ID) %>%
         filter(is.na(`SLV Area`)) %>%
         arrange(`SLV Area Number`)
@@ -574,15 +657,15 @@
       df <- data()
       
       # Add the final output
-      df$`SLV produktionssområde` <- site_df$Produktionssområde
+      df$`SLV Produktionsområde` <- site_df$Produktionsområde
       df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
       locations <- df %>%   
-        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV produktionssområde`) %>%
+        group_by(`Provtagningsplats:`, PROD_AREA_ID, `SLV Produktionsområde`) %>%
         summarise(`N visits` = n(), .groups = "drop") %>%
         rename(`Reported Site` = `Provtagningsplats:`,
-               `SLV Area` = `SLV produktionssområde`,
+               `SLV Area` = `SLV Produktionsområde`,
                `SLV Area Number` = PROD_AREA_ID) %>%
         filter(!is.na(`SLV Area`)) %>%
         arrange(`SLV Area Number`)
@@ -835,6 +918,10 @@
     output$download <- downloadHandler(
       filename = function() { "data.txt" },
       content = function(file) {
+        processed_data <- processed_data()$data
+        
+        
+        
         write.table(processed_data()$data, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
       }
     )
