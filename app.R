@@ -40,6 +40,7 @@
   coordinate_column <- "GPS-koord."
   site_column <- "Provtagningsplats:"
   taxa_column <- "Provmärkning"
+  unused_columns <- c("Ankomstdatum", "Prov validerat den", "Eurofins provnummer", "Provets status")
   
   # Define UI for application
   ui <- fluidPage(
@@ -48,8 +49,8 @@
       sidebarPanel(
         fileInput("file", "Upload Eurofins Excel File", accept = ".xlsx"),
         fileInput("file_summary", "Upload Summary Excel File", accept = ".xlsx"),
-        selectInput("coordinate_output", "Coordinate output:", 
-                    choices = c("GPS" = "actual", "Midpoint Production Area" = "midpoint"), 
+        selectInput("coordinate_output", "Use position:", 
+                    choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"), 
                     selected = "midpoint"),
         selectInput("sample_type", "Sample Type:", 
                     choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
@@ -377,6 +378,7 @@
       
       # Identify columns that could not be renamed
       problem_columns <- problem_columns[!problem_columns %in% c("LATIT", "LONGI", "on_land", "Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99")]
+      problem_columns <- problem_columns[!problem_columns %in% unused_columns]
       problem_columns <- problem_columns[!problem_columns %in% column_mapping]
       problem_columns <- problem_columns[!problem_columns %in% coordinate_column]
       problem_columns <- problem_columns[!problem_columns %in% site_column]
