@@ -492,7 +492,8 @@
     output$unmapped_data <- renderDT({
       validate(need(input$file, "Waiting for file upload..."))
       datatable(processed_data()$renamed_columns, options = list(
-        pageLength = 25))
+        pageLength = 25,
+        language = list(emptyTable = "All columns are mapped")))
     })
     
     output$table_raw <- renderDT({
