@@ -221,6 +221,8 @@ server <- function(input, output, session) {
     # Add year column if a match was found
     if (!"År" %in% colnames(df) && !is.na(year_match)) {
       df <- df %>% mutate("År" = as.integer(year_match))
+      showNotification(paste("The column 'År' is missing from data, assuming all rows are from year:", 
+                             paste(year_match)), type = "warning", duration = 10)
     }
     
     # Define required column names
