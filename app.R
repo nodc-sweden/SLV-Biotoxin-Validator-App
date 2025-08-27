@@ -391,7 +391,9 @@ server <- function(input, output, session) {
                                "Vilda" = "Wild",
                                "Odlade" = "Farmed",
                                .default = SAMPLE_ORIGIN,
-                               .missing = SAMPLE_ORIGIN)
+                               .missing = SAMPLE_ORIGIN),
+        MNDEP = 0,
+        MXDEP = 0
       )
     
     data_validation <- data_out %>%
