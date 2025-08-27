@@ -80,7 +80,11 @@
                    h4("Valid Entries"),
                    DTOutput("table_sites_valid")
           ),
-          tabPanel("Origin Validation", h4("Issues Found"), DTOutput("table_origin")),
+          tabPanel("Origin Validation", 
+                   h4("Duplicate Inputs"), 
+                   DTOutput("table_origin"),
+                   h4("Missing Origin Input"),
+                   DTOutput("table_missing_origin")),
           tabPanel("Time Series Plot",
                    fluidRow(
                      column(6, selectInput("selected_param", "Select Toxin:", choices = NULL)),
@@ -206,7 +210,7 @@
       # Process dataframe
       df <- df %>%
         mutate(SDATE = as.character(make_date(year = År, month = Mån, day = Dat))) %>%
-        select(SDATE, Nr, Art, `V/O`) %>%
+        select(SDATE, Havsområde, Nr, Art, `V/O`) %>%
         filter(complete.cases(.))
       
       taxa <- df %>% select(Art) %>% distinct()
@@ -235,12 +239,12 @@
         ungroup()
       
       problems <- df %>%
-        group_by(Nr, SDATE, Art) %>%
+        group_by(Nr, Havsområde, SDATE, Art) %>%
         summarize(n_origins = n_distinct(`V/O`), .groups = "drop") %>%
         filter(n_origins > 1)
       
       problem_rows <- df %>%
-        semi_join(problems, by = c("Nr", "SDATE", "Art")) %>%
+        semi_join(problems, by = c("Nr", "Havsområde", "SDATE", "Art")) %>%
         rename(Date = SDATE)
       
       return(list(summary = summary, problems = problem_rows))
@@ -438,7 +442,7 @@
       taxa_data$taxa <- taxa
     })
     
-    output$table_summary <- renderDT({
+    issues <- reactive({
       df <- data()
       taxa <- taxa_data$taxa
       site_df <- site_df_data()
@@ -449,35 +453,62 @@
         filter(is.na(`Provtagningsdatum:`)) %>%
         nrow()
       
-      # Count coordinate issues
+      # Coordinate issues
       coord_issues <- df %>%
         filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI)) %>%
         nrow()
       
-      # Count taxa validation issues
+      # Taxa issues
       taxa_issues <- df %>%
         left_join(taxa, by = "Provmärkning") %>%
         filter(is.na(scientificname)) %>%
         nrow()
       
-      # Count origin validation issues
-      origin_issues <- processed_df %>%
-        filter(is.na(SAMPLE_ORIGIN)) %>%
+      # Origin issues
+      origin_missing <- processed_df %>%
+        filter(is.na(SAMPLE_ORIGIN))
+      
+      # Origin issues
+      origin_issues <- origin_missing %>%
         nrow()
       
-      # Add the final output
+      # Site issues
       df$PROD_AREA <- site_df$Produktionsområde
       df$PROD_AREA_ID <- site_df$number
       df$`SLV namn` <- site_df$site
       
-      site_issues <- df %>%   
+      site_issues <- df %>%
         filter(is.na(PROD_AREA_ID)) %>%
         nrow()
       
-      # Create summary dataframe
+      # Return as a list so each can be accessed
+      list(
+        coord_issues = coord_issues,
+        taxa_issues = taxa_issues,
+        site_issues = site_issues,
+        date_issues = date_issues,
+        origin_issues = origin_issues,
+        origin_missing = origin_missing
+      )
+    })
+    
+    output$table_summary <- renderDT({
       summary_df <- data.frame(
-        Validation = c("Coordinate Issues", "Taxa Issues", "Site Issues", "Missing Sampling Dates", "Origin Issues (Wild/Cultured)"),
-        "Number of issue rows" = c(coord_issues, taxa_issues, site_issues, date_issues, origin_issues), check.names = FALSE
+        Validation = c(
+          "Coordinate Issues",
+          "Taxa Issues",
+          "Site Issues",
+          "Missing Sampling Dates",
+          "Origin Issues (Wild/Cultured)"
+        ),
+        "Number of issue rows" = c(
+          issues()$coord_issues,
+          issues()$taxa_issues,
+          issues()$site_issues,
+          issues()$date_issues,
+          issues()$origin_issues
+        ),
+        check.names = FALSE
       )
       
       withProgress(message = "Loading data...", value = 0.5, {
@@ -909,9 +940,32 @@
     })
     
     output$table_origin <- renderDT({
-      validate(need(input$file_summary, "Waiting for file upload..."))
+
+      table <- data_summary()$problems %>%
+        rename(`Production Area` = Havsområde,
+               `Production Area Code` = Nr,
+               Species = Art,
+               `Origin (Wild/Farmed)` = `V/O`)
       
-      datatable(data_summary()$problems, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+      datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+        "function(row, data) { 
+        $(row).css('color', 'red'); 
+      }"
+      )))
+    })
+    
+    output$table_missing_origin <- renderDT({
+      validate(need(input$file, "Waiting for file upload..."))
+
+      table <- issues()$origin_missing %>%
+        select(SDATE, PROD_AREA, PROD_AREA_ID, LATNM, SAMPLE_ORIGIN) %>%
+        rename(Date = SDATE,
+               `Production Area` = PROD_AREA,
+               `Production Area Code` = PROD_AREA_ID,
+               Species = LATNM,
+               `Origin (Wild/Farmed)` = SAMPLE_ORIGIN)
+      
+      datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
         "function(row, data) { 
         $(row).css('color', 'red'); 
       }"
