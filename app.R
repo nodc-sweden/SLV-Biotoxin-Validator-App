@@ -47,12 +47,12 @@
     titlePanel("SLV Marine Biotoxin Data Validation"),
     sidebarLayout(
       sidebarPanel(
-        fileInput("file", "Upload Eurofins Excel File", accept = ".xlsx"),
-        fileInput("file_summary", "Upload Summary Excel File", accept = ".xlsx"),
+        fileInput("file", "Upload Eurofins excel file", accept = ".xlsx"),
+        fileInput("file_summary", "Upload summary excel file (with info about wild/farmed)", accept = ".xlsx"),
         selectInput("coordinate_output", "Use position:", 
                     choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"), 
                     selected = "midpoint"),
-        selectInput("sample_type", "Sample Type:", 
+        selectInput("sample_type", "Sample type:", 
                     choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
                     selected = "live_bivalve_molluscs_v2"),
         downloadButton("download", "Download Processed .txt File"),
@@ -154,7 +154,7 @@
         
         # Which rows have valid SWEREF99 TM coords?
         idx <- which(!is.na(df$Mittpunkt_E_SWEREF99) &
-                       !is.na(data_mapped$Mittpunkt_N_SWEREF99))
+                       !is.na(df$Mittpunkt_N_SWEREF99))
         
         # Pre-allocate output vectors (NA where coords are missing)
         LONGI <- rep(NA_real_, nrow(df))
