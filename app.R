@@ -121,9 +121,7 @@ ui <- fluidPage(
                             tags$li("Validate taxonomic names using the World Register of Marine Species (WoRMS). Data in red color require action."),
                             tags$li("Analyze site names and their corresponding regions. Data in red color require action."),
                             tags$li("Explore time series and spatial trends."),
-                            tags$li(HTML('After validation, download a processed data file that can be delivered to <a href="https://shark.smhi.se/" target="_blank">SHARK</a>.')))),
-                   p(HTML('The source code for this application is available on <a href="https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App" target="_blank">GitHub</a>.')
-                   )
+                            tags$li(HTML('After validation, download a processed data file that can be delivered to <a href="https://shark.smhi.se/" target="_blank">SHARK</a>.'))))
                  ),
                  tags$footer(
                    style = "text-align:center; padding:10px; font-size:0.9em; color:#666;",
