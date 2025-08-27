@@ -211,6 +211,17 @@ server <- function(input, output, session) {
     req(input$file_summary)
     # Read file
     df <- read_excel(input$file_summary$datapath, .name_repair = "none", progress = FALSE)
+
+    # Extract filename
+    filename <- basename(input$file_summary$datapath)
+    
+    # Try to extract a 4-digit year (between 1900–2099 for safety)
+    year_match <- str_extract(filename, "(19|20)\\d{2}")
+    
+    # Add year column if a match was found
+    if (!is.na(year_match)) {
+      df <- df %>% mutate(År = as.integer(year_match))
+    }
     
     # Define required column names
     required_cols <- c("År", "Mån", "Dat", "Nr", "Art", "V/O")
