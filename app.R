@@ -29,9 +29,10 @@ github_url <- "https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App"
 coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE)
 
 # Read list of toxins
-toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE) %>%
-  select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH_kg, Enhet_MH_l, Parameternamn_MH, `Gränsvärde_kommersiell_försäljning`) %>%
-  drop_na(Kortnamn_MH)
+toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE)
+# %>%
+#   select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH_kg, Enhet_MH_l, Parameternamn_MH, CLOSE_LEV) %>%
+#   drop_na(Kortnamn_MH)
 
 # Map Metadata headers to the correct column names
 column_mapping <- c(
@@ -62,6 +63,8 @@ ui <- fluidPage(
                   choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
                   selected = "live_bivalve_molluscs_v2"),
       downloadButton("download", "Download Processed .txt File"),
+      br(), br(),
+      downloadButton("download_analysis", "Download Analysis Info .txt File"),
       width = 3
     ),
     mainPanel(
@@ -812,7 +815,7 @@ server <- function(input, output, session) {
     # Get threshold values
     thresholds <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
-      select(Gränsvärde_kommersiell_försäljning)
+      select(CLOSE_LEV)
     
     # Get unit
     unit <- toxin_list %>%
@@ -840,8 +843,8 @@ server <- function(input, output, session) {
         theme_minimal() +
         
         # Only add threshold line if it is not NA
-        geom_hline(data = thresholds %>% filter(!is.na(Gränsvärde_kommersiell_försäljning)), 
-                   aes(yintercept = Gränsvärde_kommersiell_försäljning, 
+        geom_hline(data = thresholds %>% filter(!is.na(CLOSE_LEV)), 
+                   aes(yintercept = CLOSE_LEV, 
                        linetype = "Legal limit"), 
                    color = "blue", na.rm = TRUE) +
         
@@ -849,7 +852,7 @@ server <- function(input, output, session) {
         
         # Show threshold legend only if the threshold exists
         guides(color = guide_legend(order = 1), 
-               linetype = if (any(!is.na(thresholds$Gränsvärde_kommersiell_försäljning))) 
+               linetype = if (any(!is.na(thresholds$CLOSE_LEV))) 
                  guide_legend(order = 2) else "none") +
         
         theme(
@@ -1009,9 +1012,36 @@ server <- function(input, output, session) {
     content = function(file) {
       processed_data <- processed_data()$data
       
-      
-      
       write.table(processed_data()$data, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
+    }
+  )
+  
+  output$download_analysis <- downloadHandler(
+    filename = function() { "analysis_info.txt" },
+    content = function(file) {
+      processed_data <- processed_data()$data
+      
+      # Drop NA columns
+      processed_data <- processed_data[, colSums(!is.na(processed_data)) > 0]
+      
+      # Select file based on sample type
+      file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
+      
+      template <- read_excel(file_to_use, skip = 2, progress = FALSE, sheet = "Analysinfo")[-1]
+      
+      template_headers <- template[0,] %>%
+        mutate(across(everything(), as.character))
+      
+      analysis_info <- toxin_list %>%
+        filter(Kortnamn_MH %in% names(processed_data) )%>%
+        mutate(across(everything(), as.character)) %>%
+        rename(PARAM = Kortnamn_MH)
+      
+      data_out <- template_headers %>%
+        bind_rows(analysis_info) %>%
+        select(any_of(names(template_headers)))
+      
+      write.table(data_out, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
   )
 }
