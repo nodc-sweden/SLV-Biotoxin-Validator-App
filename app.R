@@ -54,8 +54,8 @@ ui <- fluidPage(
   titlePanel("SLV Marine Biotoxin Data Validation"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Upload Eurofins excel file", accept = ".xlsx"),
-      fileInput("file_summary", "Upload summary excel file (with info about wild/farmed)", accept = ".xlsx"),
+      fileInput("file", "Upload Eurofins Excel file", accept = ".xlsx"),
+      fileInput("file_summary", "Upload summary Excel file (with info about wild/farmed)", accept = ".xlsx"),
       selectInput("coordinate_output", "Use position:", 
                   choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"), 
                   selected = "midpoint"),
