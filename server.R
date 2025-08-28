@@ -1,220 +1,27 @@
-#
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    https://shiny.posit.co/
-#
-
-# Load required libraries
-require(shiny)
-require(tidyverse)
-require(readxl)
-require(sf)
-require(leaflet)
-require(worrms)
-require(DT)
-
-# Load helper functions
-source("R/helper.R")
-
-# Read version from DESCRIPTION
-pkg_version <- read.dcf("DESCRIPTION", fields = "Version")[1]
-
-# GitHub repo link
-github_url <- "https://github.com/nodc-sweden/SLV-Biotoxin-Validator-App"
-
-# Load shapefile for Swedish Westcoast
-coastline <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE)
-
-# Read list of toxins
-toxin_list <- read_excel("config/lista_toxiner.xlsx", progress = FALSE)
-# %>%
-#   select(`Rapporterat-parameternamn`, Kortnamn_MH, Enhet_MH_kg, Enhet_MH_l, Parameternamn_MH, CLOSE_LEV) %>%
-#   drop_na(Kortnamn_MH)
-
-# Map Metadata headers to the correct column names
-column_mapping <- c(
-  "ORDERER" = "Kund",
-  "SDATE" = "Provtagningsdatum:",
-  "ANADATE" = "Analys påbörjad den",
-  "LATNM" = "scientificname",
-  "SMPNO" = "Prov ID"
-)
-
-# Define column names
-coordinate_column <- "GPS-koord."
-site_column <- "Provtagningsplats:"
-taxa_column <- "Provmärkning"
-unused_columns <- c("Ankomstdatum", "Prov validerat den", "Eurofins provnummer", "Provets status")
-
-# Define UI for application
-ui <- fluidPage(
-  titlePanel("SLV Marine Biotoxin Data Validation"),
-  sidebarLayout(
-    sidebarPanel(
-      fileInput("file", "Upload Eurofins Excel file", accept = ".xlsx"),
-      fileInput("file_summary", "Upload summary Excel file (with info about wild/farmed)", accept = ".xlsx"),
-      selectInput("coordinate_output", "Use position:", 
-                  choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"), 
-                  selected = "midpoint"),
-      selectInput("sample_type", "Sample type:", 
-                  choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
-                  selected = "live_bivalve_molluscs_v2"),
-      downloadButton("download", "Download Processed .txt File"),
-      br(), br(),
-      downloadButton("download_analysis", "Download Analysis Info .txt File"),
-      width = 3
-    ),
-    mainPanel(
-      tabsetPanel(
-        tabPanel("Summary",
-                 h4("Issue Summary"),
-                 DTOutput("table_summary"),
-                 h4("Unknown Columns"),
-                 DTOutput("unmapped_data")
-        ),
-        tabPanel("Map", leafletOutput("map", height = "800px")),
-        tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
-        tabPanel("Taxa Validation", 
-                 h4("Issues Found"),
-                 DTOutput("table_taxa"),
-                 h4("Valid Entries"),
-                 DTOutput("table_taxa_valid")
-        ),
-        tabPanel("Site Validation",
-                 h4("Issues Found"),
-                 DTOutput("table_sites"),
-                 h4("Valid Entries"),
-                 DTOutput("table_sites_valid")
-        ),
-        tabPanel("Origin Validation", 
-                 h4("Duplicate Inputs"), 
-                 DTOutput("table_origin"),
-                 h4("Missing Origin Input"),
-                 DTOutput("table_missing_origin")),
-        tabPanel("Time Series Plot",
-                 fluidRow(
-                   column(6, selectInput("selected_param", "Select Toxin:", choices = NULL)),
-                   column(6, selectInput("log_scale", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
-                 ),
-                 plotOutput("time_series_plot", height = "1000px")
-        ),
-        tabPanel("Geographical Plot",
-                 fluidRow(
-                   column(4, selectInput("selected_taxa", "Select Taxa:", choices = NULL)),
-                   column(4, selectInput("selected_param_map", "Select Toxin:", choices = NULL)),
-                   column(4, selectInput("log_scale_map", "Log Scale:", choices = c("No" = "none", "Yes" = "log10")))
-                 ),
-                 plotOutput("spatial_plot", height = "800px")
-        ),
-        tabPanel("Original Data", DTOutput("table_raw")),
-        tabPanel("About",
-                 fluidRow(
-                   column(12, 
-                          h3("About This Application"),
-                          p("This Shiny application provides tools for validating and processing marine biotoxin data collected by the SLV."),
-                          p("Instructions:"),
-                          tags$ul(
-                            tags$li("Upload and validate biotoxin data from Excel files, following the export format from Eurofins."),
-                            tags$li("Upload a summary Excel files, containing information on Origin (Wild/Culutured). Required columns are År, Mån, Dat, Nr, Art and V/O."),
-                            tags$li("Visualize sampling locations on an interactive map."),
-                            tags$li("Check for missing or incorrect coordinates. Data in red color will require action before data submission to SHARK, orange may need attention."),
-                            tags$li("Validate taxonomic names using the World Register of Marine Species (WoRMS). Data in red color require action."),
-                            tags$li("Analyze site names and their corresponding regions. Data in red color require action."),
-                            tags$li("Explore time series and spatial trends."),
-                            tags$li(HTML('After validation, download a processed data file that can be delivered to <a href="https://shark.smhi.se/" target="_blank">SHARK</a>.'))))
-                 ),
-                 tags$footer(
-                   style = "text-align:center; padding:10px; font-size:0.9em; color:#666;",
-                   HTML(
-                     paste0(
-                       "Version ", pkg_version, " – ",
-                       "<a href='", github_url, "' target='_blank'>GitHub repository</a>"
-                     )
-                   )
-                 )
-        )
-      )
-    )
-  )
-)
-
-# Define server logic
+# ============================================
+# SERVER
+# ============================================
 server <- function(input, output, session) {
-  data <- reactive({
-    req(input$file, site_df_data())
-    df <- read_excel(input$file$datapath, skip = 1, .name_repair = "none", progress = FALSE)
-    header <- names(read_excel(input$file$datapath, .name_repair = "none", progress = FALSE))
-    colnames(df)[colnames(df) == ""] <- header[colnames(df) == ""]
-    
-    df <- df %>%
-      mutate(
-        LATIT = convert_ddmm_to_dd(substr(.[[coordinate_column]], 1, 6)),
-        LONGI = convert_ddmm_to_dd(substr(.[[coordinate_column]], 8, 13))
-      )
-    
-    if (input$coordinate_output == "midpoint") {
-      site_df <- site_df_data()
-      
-      # Add site info
-      df$PROD_AREA <- site_df$Produktionsområde
-      df$PROD_AREA_ID <- site_df$number
-      df$Mittpunkt_E_SWEREF99 <- site_df$Mittpunkt_E_SWEREF99
-      df$Mittpunkt_N_SWEREF99 <- site_df$Mittpunkt_N_SWEREF99
-      
-      # Drop old decimal-degree columns if they exist (won't error if they don't)
-      df <- df %>%
-        select(-any_of(c("LATIT", "LONGI")))
-      
-      # Which rows have valid SWEREF99 TM coords?
-      idx <- which(!is.na(df$Mittpunkt_E_SWEREF99) &
-                     !is.na(df$Mittpunkt_N_SWEREF99))
-      
-      # Pre-allocate output vectors (NA where coords are missing)
-      LONGI <- rep(NA_real_, nrow(df))
-      LATIT <- rep(NA_real_, nrow(df))
-      
-      # Transform only valid rows
-      if (length(idx) > 0) {
-        pts <- st_as_sf(
-          df[idx, ],
-          coords = c("Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99"),
-          crs = 3006             # SWEREF99 TM
-        ) %>%
-          st_transform(4326)      # WGS84 decimal degrees
-        
-        xy <- st_coordinates(pts) # X = lon, Y = lat
-        LONGI[idx] <- xy[, 1]
-        LATIT[idx] <- xy[, 2]
-      }
-      
-      # Attach back to your data
-      df$LONGI <- LONGI
-      df$LATIT <- LATIT
-    }
-    
-    # Round coordinates
-    df$LONGI <- round(df$LONGI, 4)
-    df$LATIT <- round(df$LATIT, 4)
-    
-    df <- df %>%
-      mutate(on_land = ifcb_is_near_land(
-        LATIT, 
-        LONGI, 
-        shape = "data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp",
-        distance = -10)
-      )
-    
-    return(df)
+  
+  # ---- 1. Static resources (session-shared) ----
+  
+  # run once at server start or use reactiveFileReader if you want auto-refresh on disk change
+  config_areas <- reactiveVal(read_excel("config/production_areas.xlsx", progress = FALSE))
+  toxin_list <- reactiveVal(read_excel("config/lista_toxiner.xlsx", progress = FALSE))
+  coastline <- reactiveVal(st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE))
+  
+  # ---- 2. File input + basic parsing ----
+  
+  uploaded <- reactive({
+    req(input$file)
+    read_with_headers(input$file$datapath, skip = 1)
   })
   
   data_summary <- reactive({
     req(input$file_summary)
     # Read file
     df <- read_excel(input$file_summary$datapath, .name_repair = "none", progress = FALSE)
-
+    
     # Extract filename
     filename <- basename(input$file_summary$name)
     
@@ -252,21 +59,21 @@ server <- function(input, output, session) {
                       AphiaID = integer(),
                       scientificname = character())
     
-    for (i in seq_along(taxa_names)) {
-      record <- tryCatch(
-        cbind(Art = taxa_names[i], wm_records_name(taxa_names[i], fuzzy = FALSE)),
-        error = function(e) return(NULL)
-      )
-      records <- bind_rows(records, record)
-    }
-    
-    if (nrow(records) == 0) {
-      showNotification("Unable to collect species information from WoRMS, please try again later", type = "warning")
-      
-      records <- tibble(Art = taxa_names,
-                        AphiaID = NA,
-                        scientificname = taxa_names)
-    }
+    # Call your helper instead of looping
+    records <- tryCatch(
+      fetch_worms_for_taxa(taxa_names, name_col = "Art"),
+      error = function(e) {
+        showNotification(
+          "Unable to collect species information from WoRMS, please try again later",
+          type = "warning"
+        )
+        tibble(
+          Art = taxa_names,
+          AphiaID = NA_integer_,
+          scientificname = taxa_names
+        )
+      }
+    )
     
     summary <- df %>%
       left_join(records, by = "Art") %>%
@@ -293,6 +100,104 @@ server <- function(input, output, session) {
     return(list(summary = summary, problems = problem_rows))
   })
   
+  # ---- 3. Site information ----
+  
+  # Store site_df in a reactive object
+  site_df_data <- reactive({
+    validate(need(input$file, "Waiting for file upload..."))
+    areas <- config_areas()
+    
+    # Just read enough of the uploaded file to extract sites
+    df <- uploaded()
+    
+    # Apply the function to each entry in the data frame
+    result <- sapply(df$`Provtagningsplats:`, extract_site_and_number, simplify = FALSE)
+    
+    # Convert the result to a data frame for easier handling
+    site_df <- do.call(rbind, lapply(result, function(x) data.frame(site = x$site, number = x$number)))
+    
+    # Remove potential noise
+    site_df$site <- gsub("/", "", site_df$site)
+    site_df$site <- trimws(site_df$site)
+    site_df$number <- as.character(site_df$number)
+    
+    site_df <- site_df %>% left_join(areas, by = c("number" = "Nummer"))
+    
+    return(site_df)
+  })
+  
+  # ---- 4. Main reactive datasets ----
+  
+  data <- reactive({
+    req(input$file, site_df_data())
+    df <- uploaded()
+    
+    # If "midpoint" chosen, enrich df with site info before computing
+    if (input$coordinate_output == "midpoint") {
+      site_df <- site_df_data()
+      
+      # Add site info
+      df$PROD_AREA <- site_df$Produktionsområde
+      df$PROD_AREA_ID <- site_df$number
+      df$Mittpunkt_E_SWEREF99 <- site_df$Mittpunkt_E_SWEREF99
+      df$Mittpunkt_N_SWEREF99 <- site_df$Mittpunkt_N_SWEREF99
+    }
+    
+    # Use the unified helper for either GPS or midpoint logic
+    df <- compute_coordinates(
+      df,
+      coordinate_column = coordinate_column,
+      coordinate_output = input$coordinate_output,
+      midpoint_cols = c("Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99")
+    )
+    
+    # Flag if coordinates are on land
+    df <- df %>%
+      mutate(
+        on_land = is_near_land(
+          LATIT,
+          LONGI,
+          shape = coastline(),
+          distance = -10 # negative for inside land polygon
+        )
+      )
+    
+    df
+  })
+  
+  # Create a reactiveValues object to store taxa
+  taxa_data <- reactiveValues(taxa = NULL)
+  
+  # Update `taxa` within reactive functions
+  observe({
+    df <- data()
+    taxa <- df %>% select(Provmärkning) %>% distinct()
+    taxa_names <- taxa$Provmärkning
+    
+    # Use your memoised bulk fetcher instead of looping
+    records <- tryCatch(
+      fetch_worms_for_taxa(taxa_names, name_col = "Provmärkning"),
+      error = function(e) {
+        showNotification(
+          "Unable to collect species information from WoRMS, please try again later", 
+          type = "warning"
+        )
+        tibble(
+          Provmärkning = taxa_names,
+          AphiaID = NA_integer_,
+          scientificname = taxa_names
+        )
+      }
+    )
+    
+    taxa <- taxa %>%
+      left_join(records, by = "Provmärkning") %>%
+      select(Provmärkning, AphiaID, scientificname)
+    
+    # Store the `taxa` data in the reactiveValues
+    taxa_data$taxa <- taxa
+  })
+  
   processed_data <- reactive({
     
     site_df <- site_df_data()  # Get the site_df from the reactive object
@@ -313,13 +218,13 @@ server <- function(input, output, session) {
     selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
     
     # Create a named vector for renaming
-    rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
+    rename_map <- setNames(toxin_list()$Kortnamn_MH, toxin_list()$`Rapporterat-parameternamn`)
     
     # Only remap existing colnames
     rename_map <- rename_map[names(rename_map) %in% names(data)]
     
     # Extract logical columns
-    logical_cols <- toxin_list %>%
+    logical_cols <- toxin_list() %>%
       filter(Enhet_MH_kg == "true or false")
     
     data_renamed <- data %>%
@@ -337,7 +242,7 @@ server <- function(input, output, session) {
       rename_with(~ rename_map[.x], .cols = all_of(names(rename_map)))
     
     # Loop through each parameter in toxin_list
-    for (param in toxin_list$Kortnamn_MH) {
+    for (param in toxin_list()$Kortnamn_MH) {
       # Create the new Q column name
       q_col <- paste0("Q_", param)
       
@@ -364,7 +269,7 @@ server <- function(input, output, session) {
     data$PROD_AREA <- site_df$Produktionsområde
     data$PROD_AREA_ID <- site_df$number
     
-    areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
+    areas <- config_areas()
     
     data <- data %>%
       left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
@@ -451,7 +356,7 @@ server <- function(input, output, session) {
     missing_columns <- tibble("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
     
     # Use dynamically selected unit column
-    units <- toxin_list %>%
+    units <- toxin_list() %>%
       select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
@@ -461,41 +366,7 @@ server <- function(input, output, session) {
     return(list(data = data_out, renamed_columns = missing_columns))
   })
   
-  # Create a reactiveValues object to store taxa
-  taxa_data <- reactiveValues(taxa = NULL)
-  
-  # Update `taxa` within reactive functions
-  observe({
-    df <- data()
-    taxa <- df %>% select(Provmärkning) %>% distinct()
-    taxa_names <- taxa$Provmärkning
-    records <- tibble(Provmärkning = character(),
-                      AphiaID = integer(),
-                      scientificname = character())
-    
-    for (i in seq_along(taxa_names)) {
-      record <- tryCatch(
-        cbind(Provmärkning = taxa_names[i], wm_records_name(taxa_names[i], fuzzy = FALSE)),
-        error = function(e) return(NULL)
-      )
-      records <- bind_rows(records, record)
-    }
-    
-    if (nrow(records) == 0) {
-      showNotification("Unable to collect species information from WoRMS, please try again later", type = "warning")
-      
-      records <- tibble(Provmärkning = taxa_names,
-                        AphiaID = NA,
-                        scientificname = taxa_names)
-    }
-    
-    taxa <- taxa %>%
-      left_join(records, by = "Provmärkning") %>%
-      select(Provmärkning, AphiaID, scientificname)
-    
-    # Store the `taxa` data in the reactiveValues
-    taxa_data$taxa <- taxa
-  })
+  # ---- 5. Diagnostics and validation ----
   
   issues <- reactive({
     df <- data()
@@ -547,6 +418,26 @@ server <- function(input, output, session) {
     )
   })
   
+  # ---- 6. Observers for UI updates ----
+  
+  # Update dropdown choices dynamically based on toxin_list
+  observe({
+    req(processed_data()$data)
+    processed <- processed_data()$data %>%
+      select(where(~ !all(is.na(.))))
+    
+    toxin_choices <- toxin_list() %>%
+      filter(Kortnamn_MH %in% names(processed))
+    
+    taxa_choices <- sort(unique(processed$LATNM))
+    
+    updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
+    updateSelectInput(session, "selected_param", choices = toxin_choices$Kortnamn_MH)
+    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Kortnamn_MH)
+  })
+  
+  # ---- 7. Outputs ----
+  # Tables
   output$table_summary <- renderDT({
     summary_df <- data.frame(
       Validation = c(
@@ -589,27 +480,6 @@ server <- function(input, output, session) {
       select(-LATIT, -LONGI, -on_land)
     
     datatable(df)
-  })
-  
-  output$map <- renderLeaflet({
-    validate(need(input$file, "Waiting for file upload..."))
-    
-    df_map <- data() %>%
-      filter(!is.na(LATIT) & !is.na(LONGI))
-    leaflet(df_map) %>%
-      addTiles() %>%
-      addCircleMarkers(
-        ~LONGI, ~LATIT,
-        radius = 5,
-        color = ~ifelse(on_land == TRUE, "red", "blue"),
-        popup = ~paste(
-          "Lon:", LONGI, 
-          "<br>Lat:", LATIT,
-          "<br>GPS-koord:", `GPS-koord.`,
-          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
-          "<br>Provtagningsplats:", `Provtagningsplats:`,
-          "<br>Provmärkning:", `Provmärkning`
-        )      )
   })
   
   output$table_missing <- renderDT({
@@ -680,32 +550,6 @@ server <- function(input, output, session) {
     )))
   })
   
-  # Store site_df in a reactive object
-  site_df_data <- reactive({
-    validate(need(input$file, "Waiting for file upload..."))
-    areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
-    
-    # Just read enough of the uploaded file to extract sites
-    df <- read_excel(input$file$datapath, skip = 1, .name_repair = "none", progress = FALSE)
-    header <- names(read_excel(input$file$datapath, .name_repair = "none", progress = FALSE))
-    colnames(df)[colnames(df) == ""] <- header[colnames(df) == ""]
-    
-    # Apply the function to each entry in the data frame
-    result <- sapply(df$`Provtagningsplats:`, extract_site_and_number, simplify = FALSE)
-    
-    # Convert the result to a data frame for easier handling
-    site_df <- do.call(rbind, lapply(result, function(x) data.frame(site = x$site, number = x$number)))
-    
-    # Remove potential noise
-    site_df$site <- gsub("/", "", site_df$site)
-    site_df$site <- trimws(site_df$site)
-    site_df$number <- as.character(site_df$number)
-    
-    site_df <- site_df %>% left_join(areas, by = c("number" = "Nummer"))
-    
-    return(site_df)
-  })
-  
   output$table_sites <- renderDT({
     validate(need(input$file, ""))
     site_df <- site_df_data()  # Get the site_df from the reactive object
@@ -771,23 +615,42 @@ server <- function(input, output, session) {
                                         )))
   })
   
-  # Update dropdown choices dynamically based on toxin_list
-  observe({
-    req(processed_data()$data)
-    processed <- processed_data()$data %>%
-      select(where(~ !all(is.na(.))))
+  
+  output$table_origin <- renderDT({
     
-    toxin_choices <- toxin_list %>%
-      filter(Kortnamn_MH %in% names(processed))
+    table <- data_summary()$problems %>%
+      rename(`Production Area` = Havsområde,
+             `Production Area Code` = Nr,
+             Species = Art,
+             `Origin (Wild/Farmed)` = `V/O`)
     
-    taxa_choices <- sort(unique(processed$LATNM))
-    
-    updateSelectInput(session, "selected_taxa", choices = c("All taxa", taxa_choices), selected = "All taxa")
-    updateSelectInput(session, "selected_param", choices = toxin_choices$Kortnamn_MH)
-    updateSelectInput(session, "selected_param_map", choices = toxin_choices$Kortnamn_MH)
+    datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+      "function(row, data) { 
+        $(row).css('color', 'red'); 
+      }"
+    )))
   })
   
-  # Generate time series plot
+  output$table_missing_origin <- renderDT({
+    validate(need(input$file, "Waiting for file upload..."))
+    
+    table <- issues()$origin_missing %>%
+      select(SDATE, PROD_AREA, PROD_AREA_ID, LATNM, SAMPLE_ORIGIN) %>%
+      rename(Date = SDATE,
+             `Production Area` = PROD_AREA,
+             `Production Area Code` = PROD_AREA_ID,
+             Species = LATNM,
+             `Origin (Wild/Farmed)` = SAMPLE_ORIGIN)
+    
+    datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
+      "function(row, data) { 
+        $(row).css('color', 'red'); 
+      }"
+    )))
+  })
+  
+  # Plots
+  
   output$time_series_plot <- renderPlot({
     req(processed_data()$data, input$selected_param, input$log_scale)
     
@@ -833,18 +696,18 @@ server <- function(input, output, session) {
       filter(!is.infinite(!!sym(param)))
     
     # Get threshold values
-    thresholds <- toxin_list %>%
+    thresholds <- toxin_list() %>%
       filter(Kortnamn_MH == param) %>%
       select(CLOSE_LEV)
     
     # Get unit
-    unit <- toxin_list %>%
+    unit <- toxin_list() %>%
       filter(Kortnamn_MH == param) %>%
       select(!!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
     # Get toxin name
-    toxin <- toxin_list %>%
+    toxin <- toxin_list() %>%
       filter(Kortnamn_MH == param) %>%
       select(Parameternamn_MH)
     
@@ -895,7 +758,6 @@ server <- function(input, output, session) {
     }
   })
   
-  # Generate spatial plot
   output$spatial_plot <- renderPlot({
     req(processed_data()$data, input$selected_param_map, input$log_scale_map)
     
@@ -906,13 +768,13 @@ server <- function(input, output, session) {
     selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
     
     # Get unit
-    unit <- toxin_list %>%
+    unit <- toxin_list() %>%
       filter(Kortnamn_MH == param) %>%
       select(!!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
     # Get toxin name
-    toxin <- toxin_list %>%
+    toxin <- toxin_list() %>%
       filter(Kortnamn_MH == param) %>%
       select(Parameternamn_MH)
     
@@ -959,7 +821,7 @@ server <- function(input, output, session) {
     # Create map
     if (nrow(df_map) > 0) {
       p_map <- ggplot() +
-        geom_sf(data = coastline, fill = "gray80", color = "black") +
+        geom_sf(data = coastline(), fill = "gray80", color = "black") +
         geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
         theme_minimal() +
         labs(
@@ -994,44 +856,34 @@ server <- function(input, output, session) {
     }
   })
   
-  output$table_origin <- renderDT({
-    
-    table <- data_summary()$problems %>%
-      rename(`Production Area` = Havsområde,
-             `Production Area Code` = Nr,
-             Species = Art,
-             `Origin (Wild/Farmed)` = `V/O`)
-    
-    datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
-      "function(row, data) { 
-        $(row).css('color', 'red'); 
-      }"
-    )))
-  })
+  # Map
   
-  output$table_missing_origin <- renderDT({
+  output$map <- renderLeaflet({
     validate(need(input$file, "Waiting for file upload..."))
     
-    table <- issues()$origin_missing %>%
-      select(SDATE, PROD_AREA, PROD_AREA_ID, LATNM, SAMPLE_ORIGIN) %>%
-      rename(Date = SDATE,
-             `Production Area` = PROD_AREA,
-             `Production Area Code` = PROD_AREA_ID,
-             Species = LATNM,
-             `Origin (Wild/Farmed)` = SAMPLE_ORIGIN)
-    
-    datatable(table, options = list(pageLength = 25, language = list(emptyTable = "No issues found"), rowCallback = JS(
-      "function(row, data) { 
-        $(row).css('color', 'red'); 
-      }"
-    )))
+    df_map <- data() %>%
+      filter(!is.na(LATIT) & !is.na(LONGI))
+    leaflet(df_map) %>%
+      addTiles() %>%
+      addCircleMarkers(
+        ~LONGI, ~LATIT,
+        radius = 5,
+        color = ~ifelse(on_land == TRUE, "red", "blue"),
+        popup = ~paste(
+          "Lon:", LONGI, 
+          "<br>Lat:", LATIT,
+          "<br>GPS-koord:", `GPS-koord.`,
+          "<br>Provtagningsdatum:", `Provtagningsdatum:`,
+          "<br>Provtagningsplats:", `Provtagningsplats:`,
+          "<br>Provmärkning:", `Provmärkning`
+        )      )
   })
+  
+  # Download
   
   output$download <- downloadHandler(
     filename = function() { "data.txt" },
     content = function(file) {
-      processed_data <- processed_data()$data
-      
       write.table(processed_data()$data, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
   )
@@ -1052,7 +904,7 @@ server <- function(input, output, session) {
       template_headers <- template[0,] %>%
         mutate(across(everything(), as.character))
       
-      analysis_info <- toxin_list %>%
+      analysis_info <- toxin_list() %>%
         filter(Kortnamn_MH %in% names(processed_data) )%>%
         mutate(across(everything(), as.character)) %>%
         rename(PARAM = Kortnamn_MH)
@@ -1065,6 +917,3 @@ server <- function(input, output, session) {
     }
   )
 }
-
-# Run the application
-shinyApp(ui, server)
