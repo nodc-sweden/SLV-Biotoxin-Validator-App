@@ -248,7 +248,9 @@ server <- function(input, output, session) {
     
     taxa <- df %>% select(Art) %>% distinct()
     taxa_names <- taxa$Art
-    records <- NULL
+    records <- tibble(Art = character(),
+                      AphiaID = integer(),
+                      scientificname = character())
     
     for (i in seq_along(taxa_names)) {
       record <- tryCatch(
@@ -256,6 +258,14 @@ server <- function(input, output, session) {
         error = function(e) return(NULL)
       )
       records <- bind_rows(records, record)
+    }
+    
+    if (nrow(records) == 0) {
+      showNotification("Unable to collect species information from WoRMS, please try again later", type = "warning")
+      
+      records <- tibble(Art = taxa_names,
+                        AphiaID = NA,
+                        scientificname = taxa_names)
     }
     
     summary <- df %>%
@@ -459,7 +469,9 @@ server <- function(input, output, session) {
     df <- data()
     taxa <- df %>% select(Provmärkning) %>% distinct()
     taxa_names <- taxa$Provmärkning
-    records <- NULL
+    records <- tibble(Provmärkning = character(),
+                      AphiaID = integer(),
+                      scientificname = character())
     
     for (i in seq_along(taxa_names)) {
       record <- tryCatch(
@@ -467,6 +479,14 @@ server <- function(input, output, session) {
         error = function(e) return(NULL)
       )
       records <- bind_rows(records, record)
+    }
+    
+    if (nrow(records) == 0) {
+      showNotification("Unable to collect species information from WoRMS, please try again later", type = "warning")
+      
+      records <- tibble(Provmärkning = taxa_names,
+                        AphiaID = NA,
+                        scientificname = taxa_names)
     }
     
     taxa <- taxa %>%
@@ -496,7 +516,7 @@ server <- function(input, output, session) {
     # Taxa issues
     taxa_issues <- df %>%
       left_join(taxa, by = "Provmärkning") %>%
-      filter(is.na(scientificname)) %>%
+      filter(is.na(AphiaID)) %>%
       nrow()
     
     # Origin issues
@@ -634,7 +654,7 @@ server <- function(input, output, session) {
   output$table_taxa <- renderDT({
     validate(need(input$file, ""))
     taxa <- taxa_data$taxa %>%
-      filter(is.na(scientificname)) %>%
+      filter(is.na(AphiaID)) %>%
       rename(`Scientific Name` = scientificname,
              `Reported Scientific Name` = Provmärkning)
     
@@ -648,7 +668,7 @@ server <- function(input, output, session) {
   output$table_taxa_valid <- renderDT({
     validate(need(input$file, "Waiting for file upload..."))
     taxa_valid <- taxa_data$taxa %>%
-      filter(!is.na(scientificname)) %>%
+      filter(!is.na(AphiaID)) %>%
       arrange(scientificname) %>%
       rename(`Scientific Name` = scientificname,
              `Reported Scientific Name` = Provmärkning)
