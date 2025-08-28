@@ -78,7 +78,12 @@ server <- function(input, output, session) {
       distinct() %>%
       group_by(PROD_AREA_ID, SDATE, LATNM) %>%
       filter(n_distinct(SAMPLE_ORIGIN) == 1) %>%  # Keep only groups with one unique SAMPLE_ORIGIN
-      ungroup()
+      ungroup() %>%
+      mutate(SAMPLE_ORIGIN = recode(SAMPLE_ORIGIN,
+                                    "Vilda" = "Wild",
+                                    "Odlade" = "Farmed",
+                                    .default = SAMPLE_ORIGIN,
+                                    .missing = SAMPLE_ORIGIN))
     
     problems <- df %>%
       group_by(Nr, Havsområde, SDATE, Art) %>%
@@ -308,11 +313,6 @@ server <- function(input, output, session) {
           TRUE ~ NA_character_
         ),
         SMTYP = "HAN",
-        SAMPLE_ORIGIN = recode(SAMPLE_ORIGIN,
-                               "Vilda" = "Wild",
-                               "Odlade" = "Farmed",
-                               .default = SAMPLE_ORIGIN,
-                               .missing = SAMPLE_ORIGIN),
         MNDEP = 0,
         MXDEP = 0
       )
@@ -383,8 +383,13 @@ server <- function(input, output, session) {
       nrow()
     
     # Origin issues
-    origin_missing <- processed_df %>%
-      filter(is.na(SAMPLE_ORIGIN))
+    if ("SAMPLE_ORIGIN" %in% names(processed_df)) {
+      origin_missing <- processed_df %>%
+        filter(is.na(SAMPLE_ORIGIN))
+    } else {
+      # Column missing -> treat all rows as issues
+      origin_missing <- processed_df
+    }
     
     # Origin issues
     origin_issues <- origin_missing %>%
