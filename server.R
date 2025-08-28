@@ -2,16 +2,8 @@
 # SERVER
 # ============================================
 server <- function(input, output, session) {
-  
-  # ---- 1. Static resources (session-shared) ----
-  
-  # run once at server start or use reactiveFileReader if you want auto-refresh on disk change
-  config_areas <- reactiveVal(read_excel("config/production_areas.xlsx", progress = FALSE))
-  toxin_list <- reactiveVal(read_excel("config/lista_toxiner.xlsx", progress = FALSE))
-  coastline <- reactiveVal(st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE))
-  
-  # ---- 2. File input + basic parsing ----
-  
+
+  # ---- File input + basic parsing ----
   uploaded <- reactive({
     req(input$file)
     read_with_headers(input$file$datapath, skip = 1)
@@ -100,12 +92,12 @@ server <- function(input, output, session) {
     return(list(summary = summary, problems = problem_rows))
   })
   
-  # ---- 3. Site information ----
+  # ---- Site information ----
   
   # Store site_df in a reactive object
   site_df_data <- reactive({
     validate(need(input$file, "Waiting for file upload..."))
-    areas <- config_areas()
+    areas <- config_areas
     
     # Just read enough of the uploaded file to extract sites
     df <- uploaded()
@@ -126,7 +118,7 @@ server <- function(input, output, session) {
     return(site_df)
   })
   
-  # ---- 4. Main reactive datasets ----
+  # ---- Main reactive datasets ----
   
   data <- reactive({
     req(input$file, site_df_data())
@@ -157,7 +149,7 @@ server <- function(input, output, session) {
         on_land = is_near_land(
           LATIT,
           LONGI,
-          shape = coastline(),
+          shape = coastline,
           distance = -10 # negative for inside land polygon
         )
       )
@@ -218,13 +210,13 @@ server <- function(input, output, session) {
     selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
     
     # Create a named vector for renaming
-    rename_map <- setNames(toxin_list()$Kortnamn_MH, toxin_list()$`Rapporterat-parameternamn`)
+    rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
     
     # Only remap existing colnames
     rename_map <- rename_map[names(rename_map) %in% names(data)]
     
     # Extract logical columns
-    logical_cols <- toxin_list() %>%
+    logical_cols <- toxin_list %>%
       filter(Enhet_MH_kg == "true or false")
     
     data_renamed <- data %>%
@@ -242,7 +234,7 @@ server <- function(input, output, session) {
       rename_with(~ rename_map[.x], .cols = all_of(names(rename_map)))
     
     # Loop through each parameter in toxin_list
-    for (param in toxin_list()$Kortnamn_MH) {
+    for (param in toxin_list$Kortnamn_MH) {
       # Create the new Q column name
       q_col <- paste0("Q_", param)
       
@@ -269,7 +261,7 @@ server <- function(input, output, session) {
     data$PROD_AREA <- site_df$Produktionsområde
     data$PROD_AREA_ID <- site_df$number
     
-    areas <- config_areas()
+    areas <- config_areas
     
     data <- data %>%
       left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
@@ -356,7 +348,7 @@ server <- function(input, output, session) {
     missing_columns <- tibble("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
     
     # Use dynamically selected unit column
-    units <- toxin_list() %>%
+    units <- toxin_list %>%
       select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
@@ -366,7 +358,7 @@ server <- function(input, output, session) {
     return(list(data = data_out, renamed_columns = missing_columns))
   })
   
-  # ---- 5. Diagnostics and validation ----
+  # ---- Diagnostics and validation ----
   
   issues <- reactive({
     df <- data()
@@ -418,7 +410,7 @@ server <- function(input, output, session) {
     )
   })
   
-  # ---- 6. Observers for UI updates ----
+  # ---- Observers for UI updates ----
   
   # Update dropdown choices dynamically based on toxin_list
   observe({
@@ -426,7 +418,7 @@ server <- function(input, output, session) {
     processed <- processed_data()$data %>%
       select(where(~ !all(is.na(.))))
     
-    toxin_choices <- toxin_list() %>%
+    toxin_choices <- toxin_list %>%
       filter(Kortnamn_MH %in% names(processed))
     
     taxa_choices <- sort(unique(processed$LATNM))
@@ -436,7 +428,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "selected_param_map", choices = toxin_choices$Kortnamn_MH)
   })
   
-  # ---- 7. Outputs ----
+  # ---- Outputs ----
   # Tables
   output$table_summary <- renderDT({
     summary_df <- data.frame(
@@ -615,7 +607,6 @@ server <- function(input, output, session) {
                                         )))
   })
   
-  
   output$table_origin <- renderDT({
     
     table <- data_summary()$problems %>%
@@ -696,18 +687,18 @@ server <- function(input, output, session) {
       filter(!is.infinite(!!sym(param)))
     
     # Get threshold values
-    thresholds <- toxin_list() %>%
+    thresholds <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
       select(CLOSE_LEV)
     
     # Get unit
-    unit <- toxin_list() %>%
+    unit <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
       select(!!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
     # Get toxin name
-    toxin <- toxin_list() %>%
+    toxin <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
       select(Parameternamn_MH)
     
@@ -768,13 +759,13 @@ server <- function(input, output, session) {
     selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
     
     # Get unit
-    unit <- toxin_list() %>%
+    unit <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
       select(!!sym(selected_unit_column)) %>%
       rename(Unit = !!sym(selected_unit_column))
     
     # Get toxin name
-    toxin <- toxin_list() %>%
+    toxin <- toxin_list %>%
       filter(Kortnamn_MH == param) %>%
       select(Parameternamn_MH)
     
@@ -821,7 +812,7 @@ server <- function(input, output, session) {
     # Create map
     if (nrow(df_map) > 0) {
       p_map <- ggplot() +
-        geom_sf(data = coastline(), fill = "gray80", color = "black") +
+        geom_sf(data = coastline, fill = "gray80", color = "black") +
         geom_sf(data = df_map_sf, aes(size = !!sym(param), color = !!sym(param)), alpha = 0.7) +
         theme_minimal() +
         labs(
@@ -904,7 +895,7 @@ server <- function(input, output, session) {
       template_headers <- template[0,] %>%
         mutate(across(everything(), as.character))
       
-      analysis_info <- toxin_list() %>%
+      analysis_info <- toxin_list %>%
         filter(Kortnamn_MH %in% names(processed_data) )%>%
         mutate(across(everything(), as.character)) %>%
         rename(PARAM = Kortnamn_MH)
