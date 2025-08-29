@@ -5,17 +5,17 @@ server <- function(input, output, session) {
 
   # ---- File input + basic parsing ----
   uploaded <- reactive({
-    req(input$file)
-    read_with_headers(input$file$datapath, skip = 1)
+    req(input$file_eurofins)
+    read_with_headers(input$file_eurofins$datapath, skip = 1)
   })
   
   data_summary <- reactive({
-    req(input$file_summary)
+    req(input$file_slv_summary)
     # Read file
-    df <- read_excel(input$file_summary$datapath, .name_repair = "none", progress = FALSE)
+    df <- read_excel(input$file_slv_summary$datapath, .name_repair = "none", progress = FALSE)
     
     # Extract filename
-    filename <- basename(input$file_summary$name)
+    filename <- basename(input$file_slv_summary$name)
     
     # Try to extract a 4-digit year (between 1900–2099 for safety)
     year_match <- str_extract(filename, "(19|20)\\d{2}")
@@ -51,21 +51,10 @@ server <- function(input, output, session) {
                       AphiaID = integer(),
                       scientificname = character())
     
-    # Call your helper instead of looping
-    records <- tryCatch(
-      fetch_worms_for_taxa(taxa_names, name_col = "Art"),
-      error = function(e) {
-        showNotification(
-          "Unable to collect species information from WoRMS, please try again later",
-          type = "warning"
-        )
-        tibble(
-          Art = taxa_names,
-          AphiaID = NA_integer_,
-          scientificname = taxa_names
-        )
-      }
-    )
+    # Call helper to collect info from WoRMS
+    records <- withProgress(message = "Looking up taxa in WoRMS...", value = 0, {
+      fetch_worms_for_taxa(taxa_names, name_col = "Art")
+    })
     
     summary <- df %>%
       left_join(records, by = "Art") %>%
@@ -101,22 +90,17 @@ server <- function(input, output, session) {
   
   # Store site_df in a reactive object
   site_df_data <- reactive({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     areas <- config_areas
     
     # Just read enough of the uploaded file to extract sites
     df <- uploaded()
     
-    # Apply the function to each entry in the data frame
-    result <- sapply(df$`Provtagningsplats:`, extract_site_and_number, simplify = FALSE)
-    
-    # Convert the result to a data frame for easier handling
-    site_df <- do.call(rbind, lapply(result, function(x) data.frame(site = x$site, number = x$number)))
-    
-    # Remove potential noise
-    site_df$site <- gsub("/", "", site_df$site)
-    site_df$site <- trimws(site_df$site)
-    site_df$number <- as.character(site_df$number)
+    # Extract site and number to each entry in the data frame
+    site_df <- purrr::map_dfr(df$`Provtagningsplats:`, function(x) {
+      val <- extract_site_and_number(x)
+      tibble(site = gsub("/", "", trimws(val$site)), number = as.character(val$number))
+    })
     
     site_df <- site_df %>% left_join(areas, by = c("number" = "Nummer"))
     
@@ -126,7 +110,7 @@ server <- function(input, output, session) {
   # ---- Main reactive datasets ----
   
   data <- reactive({
-    req(input$file, site_df_data())
+    req(input$file_eurofins, site_df_data())
     df <- uploaded()
     
     # If "midpoint" chosen, enrich df with site info before computing
@@ -159,7 +143,7 @@ server <- function(input, output, session) {
         )
       )
     
-    df
+    return(df)
   })
   
   # Create a reactiveValues object to store taxa
@@ -172,20 +156,17 @@ server <- function(input, output, session) {
     taxa_names <- taxa$Provmärkning
     
     # Use your memoised bulk fetcher instead of looping
-    records <- tryCatch(
-      fetch_worms_for_taxa(taxa_names, name_col = "Provmärkning"),
-      error = function(e) {
-        showNotification(
-          "Unable to collect species information from WoRMS, please try again later", 
-          type = "warning"
-        )
-        tibble(
-          Provmärkning = taxa_names,
-          AphiaID = NA_integer_,
-          scientificname = taxa_names
-        )
-      }
-    )
+    records <- withProgress(message = "Looking up taxa in WoRMS...", value = 0, {
+      fetch_worms_for_taxa(taxa_names, name_col = "Provmärkning")
+    })
+    
+    # If *everything* failed, then notify
+    if (all(is.na(records$AphiaID))) {
+      showNotification(
+        "Unable to collect species information from WoRMS, please try again later", 
+        type = "warning"
+      )
+    }
     
     taxa <- taxa %>%
       left_join(records, by = "Provmärkning") %>%
@@ -196,166 +177,50 @@ server <- function(input, output, session) {
   })
   
   processed_data <- reactive({
-    
-    site_df <- site_df_data()  # Get the site_df from the reactive object
-    
+    site_df <- site_df_data()
     data <- data()
-    
-    # Check if file_summary has been uploaded
-    if (!is.null(input$file_summary)) {
-      data_summary <- data_summary()$summary
-    } else {
-      data_summary <- NULL
-    }
-    
-    # Use the stored `taxa` for joining
     taxa <- taxa_data$taxa
+    areas <- config_areas
     
-    # Define which unit column to use (e.g., based on input or condition)
-    selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
+    data_summary <- if (!is.null(input$file_slv_summary)) data_summary()$summary else NULL
+    selected_unit_column <- get_selected_unit_column(input$sample_type)
+    rename_map <- build_rename_map(toxin_list, data)
+    logical_cols <- get_logical_cols(toxin_list)
     
-    # Create a named vector for renaming
-    rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
-    
-    # Only remap existing colnames
-    rename_map <- rename_map[names(rename_map) %in% names(data)]
-    
-    # Extract logical columns
-    logical_cols <- toxin_list %>%
-      filter(Enhet_MH_kg == "true or false")
-    
+    # For missing column tracking later
     data_renamed <- data %>%
       rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
       select(where(~ !all(is.na(.))))
     
-    # Rename parameters
-    data <- data %>%
-      mutate(across(all_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
-        . == "Ej påvisad" ~ FALSE, 
-        . == "~PV0016C" ~ FALSE,
-        . == "Påvisad" ~ TRUE,
-        TRUE ~ NA_real_
-      ))) %>%
-      rename_with(~ rename_map[.x], .cols = all_of(names(rename_map)))
+    # Clean values
+    data <- clean_logical_values(data, logical_cols, rename_map)
+    data <- clean_numeric_values(data, toxin_list, logical_cols)
     
-    # Loop through each parameter in toxin_list
-    for (param in toxin_list$Kortnamn_MH) {
-      # Create the new Q column name
-      q_col <- paste0("Q_", param)
-      
-      # Ensure the column exists in data
-      if (param %in% names(data) & !param %in% logical_cols$Kortnamn_MH) {
-        # Extract the "<" signs into the new column
-        data[[q_col]] <- ifelse(grepl("^<\\s*", data[[param]]), "<", NA)
-        
-        # Remove the "<" sign (with optional spaces) and convert to numeric
-        data[[param]] <- gsub("^<\\s*", "", data[[param]])
-        data[[param]][!grepl("^[0-9.]+$", data[[param]])] <- NA
-        data[[param]] <- as.numeric(data[[param]])
-      }
-    }
+    # Add metadata
+    data <- add_site_taxa_info(data, taxa, site_df, areas)
+    data_mapped <- apply_column_mapping(data, column_mapping)
     
-    # Transform logical colunmns
-    data <- data %>%
-      mutate(across(all_of(logical_cols$Kortnamn_MH), ~ as.logical(.)))
-    
-    # Add taxa info
-    data <- data %>% left_join(taxa, by = "Provmärkning")
-    
-    # Add site info
-    data$PROD_AREA <- site_df$Produktionsområde
-    data$PROD_AREA_ID <- site_df$number
-    
-    areas <- config_areas
-    
-    data <- data %>%
-      left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
-    
-    taxa <- data %>% select(Provmärkning) %>% distinct()
-    
-    data_mapped <- data %>%
-      left_join(taxa, by = "Provmärkning") %>%
-      rename(!!!column_mapping) %>%
-      mutate(
-        ORDERER = recode(ORDERER, "Livsmedelsverket" = "SLV"),
-        PROJ = "SLV",
-        MYEAR = lubridate::year(SDATE)
-      ) %>%
-      mutate(across(everything(), as.character))
-    
-    # Only join data_summary if file_summary exists
+    # Join data_summary if available
     if (!is.null(data_summary)) {
       data_mapped <- data_mapped %>%
         left_join(data_summary, by = c("SDATE", "LATNM", "PROD_AREA_ID"), relationship = "many-to-many")
     }
     
-    # Select file based on sample type
-    file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
-    
-    template <- read_excel(file_to_use, skip = 2, progress = FALSE)[-1]
-    
-    template_headers <- template[0,] %>%
-      mutate(across(everything(), as.character))
-    
+    # Apply template headers
+    template_headers <- get_template(input$sample_type)$headers
     data_out <- template_headers %>%
-      bind_rows(data_mapped %>% select(any_of(names(template_headers))))
+      bind_rows(data_mapped %>% select(any_of(names(template_headers)))) %>%
+      add_position_metadata(input$coordinate_output)
+
+    # Missing column diagnostics
+    missing_columns <- identify_missing_columns(
+      data_renamed, data_out, rename_map,
+      unused_columns, column_mapping,
+      coordinate_column, site_column, taxa_column,
+      toxin_list, selected_unit_column
+    )
     
-    data_out <- data_out %>%
-      mutate(
-        POSYS = case_when(
-          !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output == "midpoint" ~ "Centroid",
-          !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output != "midpoint" ~ "GPS",
-          TRUE ~ NA_character_
-        ),
-        COMNT_VISIT = case_when(
-          !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output == "midpoint" ~ "The given position is the centroid point of the production area. Data is collected from the entire area, and the coordinate uncertainty reflects the extent of this area.",
-          !is.na(LATIT) & !is.na(LONGI) & input$coordinate_output != "midpoint" ~ NA,
-          TRUE ~ NA_character_
-        ),
-        SMTYP = "HAN",
-        MNDEP = 0,
-        MXDEP = 0
-      )
-    
-    data_validation <- data_out %>%
-      select(where(~ !all(is.na(.))))
-    
-    problem_columns <- names(data_renamed)[!names(data_renamed) %in% names(data_validation)]
-    
-    # Identify columns that could not be renamed
-    problem_columns <- problem_columns[!problem_columns %in% c("LATIT", "LONGI", "on_land", "Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99")]
-    problem_columns <- problem_columns[!problem_columns %in% unused_columns]
-    problem_columns <- problem_columns[!problem_columns %in% column_mapping]
-    problem_columns <- problem_columns[!problem_columns %in% coordinate_column]
-    problem_columns <- problem_columns[!problem_columns %in% site_column]
-    problem_columns <- problem_columns[!problem_columns %in% taxa_column]
-    
-    # Reverse the map: keys become values and vice versa
-    reverse_map <- setNames(names(rename_map), rename_map)
-    
-    # Translate only the columns that exist in the reverse map
-    renamed_columns <- sapply(problem_columns, function(x) {
-      if (x %in% names(reverse_map)) {
-        reverse_map[x]
-      } else {
-        x  # Keep the original name if not found in the map
-      }
-    }, USE.NAMES = FALSE)
-    
-    # Now match the problem_columns with the reverse map
-    renamed_columns <- as.character(renamed_columns)
-    
-    missing_columns <- tibble("Uninitialized column" = renamed_columns, "Column key" = problem_columns)
-    
-    # Use dynamically selected unit column
-    units <- toxin_list %>%
-      select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
-      rename(Unit = !!sym(selected_unit_column))
-    
-    missing_columns <- missing_columns %>%
-      left_join(units, by = c("Column key" = "Kortnamn_MH"))
-    
-    return(list(data = data_out, renamed_columns = missing_columns))
+    list(data = data_out, renamed_columns = missing_columns)
   })
   
   # ---- Diagnostics and validation ----
@@ -435,7 +300,7 @@ server <- function(input, output, session) {
   
   # ---- Outputs ----
   # Tables
-  output$table_summary <- renderDT({
+  output$table_issue_summary <- renderDT({
     summary_df <- data.frame(
       Validation = c(
         "Coordinate Issues",
@@ -463,24 +328,24 @@ server <- function(input, output, session) {
     })
   })
   
-  output$unmapped_data <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+  output$table_unmapped_columns <- renderDT({
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     datatable(processed_data()$renamed_columns, options = list(
       pageLength = 25,
       language = list(emptyTable = "All columns are mapped")))
   })
   
   output$table_raw <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     
     df <- data() %>%
-      select(-LATIT, -LONGI, -on_land)
+      select(-any_of(c("LATIT", "LONGI", "on_land")))
     
     datatable(df)
   })
   
   output$table_missing <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     df_missing <- data() %>%
       filter(on_land == TRUE | is.na(LATIT) | is.na(LONGI))
     
@@ -518,8 +383,8 @@ server <- function(input, output, session) {
     ))
   })
   
-  output$table_taxa <- renderDT({
-    validate(need(input$file, ""))
+  output$table_taxa_issues <- renderDT({
+    validate(need(input$file_eurofins, ""))
     taxa <- taxa_data$taxa %>%
       filter(is.na(AphiaID)) %>%
       rename(`Scientific Name` = scientificname,
@@ -533,7 +398,7 @@ server <- function(input, output, session) {
   })
   
   output$table_taxa_valid <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     taxa_valid <- taxa_data$taxa %>%
       filter(!is.na(AphiaID)) %>%
       arrange(scientificname) %>%
@@ -547,8 +412,8 @@ server <- function(input, output, session) {
     )))
   })
   
-  output$table_sites <- renderDT({
-    validate(need(input$file, ""))
+  output$table_site_issues <- renderDT({
+    validate(need(input$file_eurofins, ""))
     site_df <- site_df_data()  # Get the site_df from the reactive object
     
     df <- data()
@@ -581,7 +446,7 @@ server <- function(input, output, session) {
   })
   
   output$table_sites_valid <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     site_df <- site_df_data()  # Get the site_df from the reactive object
     
     df <- data()
@@ -612,7 +477,7 @@ server <- function(input, output, session) {
                                         )))
   })
   
-  output$table_origin <- renderDT({
+  output$table_origin_duplicates <- renderDT({
     
     table <- data_summary()$problems %>%
       rename(`Production Area` = Havsområde,
@@ -627,8 +492,8 @@ server <- function(input, output, session) {
     )))
   })
   
-  output$table_missing_origin <- renderDT({
-    validate(need(input$file, "Waiting for file upload..."))
+  output$table_origin_missing <- renderDT({
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     
     table <- issues()$origin_missing %>%
       select(SDATE, PROD_AREA, PROD_AREA_ID, LATNM, SAMPLE_ORIGIN) %>%
@@ -653,7 +518,7 @@ server <- function(input, output, session) {
     df <- processed_data()$data
     param <- input$selected_param
     log_scale <- input$log_scale
-    selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
+    selected_unit_column <- get_selected_unit_column(input$sample_type)
     
     # Identify valid parameters that contain data
     valid_params <- df %>%
@@ -754,14 +619,14 @@ server <- function(input, output, session) {
     }
   })
   
-  output$spatial_plot <- renderPlot({
+  output$georaphical_plot <- renderPlot({
     req(processed_data()$data, input$selected_param_map, input$log_scale_map)
     
     df <- processed_data()$data
     param <- input$selected_param_map
     log_scale <- input$log_scale_map
     taxa <- input$selected_taxa
-    selected_unit_column <- if (input$sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
+    selected_unit_column <- get_selected_unit_column(input$sample_type)
     
     # Get unit
     unit <- toxin_list %>%
@@ -855,7 +720,7 @@ server <- function(input, output, session) {
   # Map
   
   output$map <- renderLeaflet({
-    validate(need(input$file, "Waiting for file upload..."))
+    validate(need(input$file_eurofins, "Waiting for file upload..."))
     
     df_map <- data() %>%
       filter(!is.na(LATIT) & !is.na(LONGI))
@@ -877,31 +742,26 @@ server <- function(input, output, session) {
   
   # Download
   
-  output$download <- downloadHandler(
+  output$download_data <- downloadHandler(
     filename = function() { "data.txt" },
     content = function(file) {
       write.table(processed_data()$data, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
   )
   
-  output$download_analysis <- downloadHandler(
+  output$download_analysis_info <- downloadHandler(
     filename = function() { "analysis_info.txt" },
     content = function(file) {
-      processed_data <- processed_data()$data
+      processed <- processed_data()$data
       
       # Drop NA columns
-      processed_data <- processed_data[, colSums(!is.na(processed_data)) > 0]
+      processed <- processed[, colSums(!is.na(processed)) > 0]
       
-      # Select file based on sample type
-      file_to_use <- paste0("config/Format_Marine_Biotoxin_", input$sample_type, ".xlsx")
-      
-      template <- read_excel(file_to_use, skip = 2, progress = FALSE, sheet = "Analysinfo")[-1]
-      
-      template_headers <- template[0,] %>%
-        mutate(across(everything(), as.character))
+      # Get headers from template
+      template_headers <- get_template(input$sample_type, "Analysinfo")$headers
       
       analysis_info <- toxin_list %>%
-        filter(Kortnamn_MH %in% names(processed_data) )%>%
+        filter(Kortnamn_MH %in% names(processed) )%>%
         mutate(across(everything(), as.character)) %>%
         rename(PARAM = Kortnamn_MH)
       

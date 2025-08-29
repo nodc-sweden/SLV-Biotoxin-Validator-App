@@ -9,6 +9,7 @@ require(sf)
 require(leaflet)
 require(worrms)
 require(DT)
+require(memoise)
 
 # ---- Helper functions ----
 source("R/helper.R")

@@ -41,8 +41,7 @@ is_near_land <- function(latitudes,
     # Get coastline and land data within the bounding box
     land <- st_read(file.path(exdir, "ne_50m_land.shp"), quiet = TRUE)
   } else {
-    land <- shape
-    land <- st_transform(land, crs = crs)
+    land <- st_transform(shape, crs = crs)
   }
   
   # Check geometry type
@@ -143,17 +142,6 @@ read_with_headers <- function(path, skip = 1) {
   df
 }
 
-# # 2) Build site_df from uploaded df in a robust, vectorized way (use map_dfr)
-# build_site_df <- function(df, areas, site_col = "Provtagningsplats:") {
-#   # extract_site_and_number must return list(site=..., number=...)
-#   res <- purrr::map_dfr(df[[site_col]], function(x) {
-#     val <- extract_site_and_number(x)
-#     data.frame(site = val$site, number = as.character(val$number), stringsAsFactors = FALSE)
-#   })
-#   res$site <- trimws(gsub("/", "", res$site))
-#   res %>% left_join(areas, by = c("number" = "Nummer"))
-# }
-
 # Memoised WoRMS calls (reduces repeated API calls)
 # Wrap wm_records_name in a safe memoised function
 safe_wm_records_name <- memoise::memoise(function(name, fuzzy = FALSE) {
@@ -203,4 +191,136 @@ compute_coordinates <- function(df, coordinate_column, coordinate_output = c("ac
   df$LONGI <- round(df$LONGI, 4)
   df$LATIT <- round(df$LATIT, 4)
   df
+}
+
+# Read formatmall template and extract headers
+get_template <- function(sample_type, sheet = NULL) {
+  # Read from disk
+  file_to_use <- paste0("config/Format_Marine_Biotoxin_", sample_type, ".xlsx")
+  template <- readxl::read_excel(file_to_use, skip = 2, progress = FALSE, sheet)[-1]
+  
+  # Convert headers
+  template_headers <- template[0, ] %>%
+    dplyr::mutate(across(everything(), as.character))
+  
+  # Return list
+  list(
+    template = template,
+    headers = template_headers
+  )
+}
+
+# Determine which unit column to use
+get_selected_unit_column <- function(sample_type) {
+  if (sample_type == "live_bivalve_molluscs_v2") "Enhet_MH_kg" else "Enhet_MH_l"
+}
+
+# Build rename map for toxin columns
+build_rename_map <- function(toxin_list, data) {
+  rename_map <- setNames(toxin_list$Kortnamn_MH, toxin_list$`Rapporterat-parameternamn`)
+  rename_map[names(rename_map) %in% names(data)]
+}
+
+# Extract logical toxin columns
+get_logical_cols <- function(toxin_list) {
+  toxin_list %>% filter(Enhet_MH_kg == "true or false")
+}
+
+# Clean logical values
+clean_logical_values <- function(data, logical_cols, rename_map) {
+  data %>%
+    mutate(across(all_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
+      . == "Ej påvisad" ~ FALSE, 
+      . == "~PV0016C" ~ FALSE,
+      . == "Påvisad" ~ TRUE,
+      TRUE ~ NA_real_
+    ))) %>%
+    rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
+    mutate(across(all_of(logical_cols$Kortnamn_MH), as.logical))
+}
+
+# Clean numeric toxin values (remove "<", coerce to numeric, keep Q_ columns)
+clean_numeric_values <- function(data, toxin_list, logical_cols) {
+  for (param in toxin_list$Kortnamn_MH) {
+    q_col <- paste0("Q_", param)
+    if (param %in% names(data) & !param %in% logical_cols$Kortnamn_MH) {
+      data[[q_col]] <- ifelse(grepl("^<\\s*", data[[param]]), "<", NA)
+      data[[param]] <- gsub("^<\\s*", "", data[[param]])
+      data[[param]][!grepl("^[0-9.]+$", data[[param]])] <- NA
+      data[[param]] <- as.numeric(data[[param]])
+    }
+  }
+  data
+}
+
+# Add site and taxa info
+add_site_taxa_info <- function(data, taxa, site_df, areas) {
+  data %>%
+    left_join(taxa, by = "Provmärkning") %>%
+    mutate(
+      PROD_AREA = site_df$Produktionsområde,
+      PROD_AREA_ID = site_df$number
+    ) %>%
+    left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
+}
+
+# Apply column mapping and fix metadata
+apply_column_mapping <- function(data, column_mapping) {
+  data %>%
+    rename(!!!column_mapping) %>%
+    mutate(
+      ORDERER = recode(ORDERER, "Livsmedelsverket" = "SLV"),
+      PROJ = "SLV",
+      MYEAR = lubridate::year(SDATE)
+    ) %>%
+    mutate(across(everything(), as.character))
+}
+
+# Add positional metadata
+add_position_metadata <- function(data, coordinate_output) {
+  data %>%
+    mutate(
+      POSYS = case_when(
+        !is.na(LATIT) & !is.na(LONGI) & coordinate_output == "midpoint" ~ "Centroid",
+        !is.na(LATIT) & !is.na(LONGI) & coordinate_output != "midpoint" ~ "GPS",
+        TRUE ~ NA_character_
+      ),
+      COMNT_VISIT = case_when(
+        !is.na(LATIT) & !is.na(LONGI) & coordinate_output == "midpoint" ~ 
+          "The given position is the centroid point of the production area. Data is collected from the entire area, and the coordinate uncertainty reflects the extent of this area.",
+        !is.na(LATIT) & !is.na(LONGI) & coordinate_output != "midpoint" ~ NA,
+        TRUE ~ NA
+      ),
+      SMTYP = "HAN",
+      MNDEP = 0,
+      MXDEP = 0
+    )
+}
+
+# Identify missing columns
+identify_missing_columns <- function(data_renamed, data_out, rename_map, 
+                                     unused_columns, column_mapping,
+                                     coordinate_column, site_column, taxa_column,
+                                     toxin_list, selected_unit_column) {
+  problem_columns <- names(data_renamed)[!names(data_renamed) %in% names(data_out)]
+  
+  problem_columns <- setdiff(problem_columns,
+                             c("LATIT", "LONGI", "on_land", 
+                               "Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99",
+                               unused_columns, column_mapping, coordinate_column, site_column, taxa_column)
+  )
+  
+  reverse_map <- setNames(names(rename_map), rename_map)
+  renamed_columns <- vapply(problem_columns, function(x) {
+    if (x %in% names(reverse_map)) reverse_map[x] else x
+  }, FUN.VALUE = character(1))
+  
+  missing_columns <- tibble("Uninitialized column" = renamed_columns,
+                            "Column key" = problem_columns)
+  
+  units <- toxin_list %>%
+    select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
+    rename(Unit = !!sym(selected_unit_column))
+  
+  missing_columns %>% left_join(units, by = c("Column key" = "Kortnamn_MH"))
 }
