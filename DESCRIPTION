@@ -9,4 +9,5 @@ Imports:
     sf,
     leaflet,
     worrms,
-    DT
+    DT,
+    memoise

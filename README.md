@@ -56,7 +56,7 @@ This Shiny app uses three configuration files to ensure that toxins, production 
 - **`config/production_areas.xlsx`** – Provides metadata for each production area.
 
 ## Deployment to Shinyapps.io
-This repository is automatically deployed as a Shinyapps.io [web application](https://nodc-sweden.shinyapps.io/biotoxin-validator/) on every push to the `main` branch through GitHub Actions.
+This repository is automatically deployed as a Shinyapps.io [web application](https://nodc-sweden.shinyapps.io/biotoxin-validator/) on every push to the `main` branch through GitHub Actions. When opening a pull request, the merging branch is deployed to a separate [test application](https://nodc-sweden.shinyapps.io/biotoxin-validator-test/).
 
 ## License
 This project is licensed under the MIT License.
