@@ -35,11 +35,21 @@ jobs:
       - name: Install rsconnect
         run: Rscript -e "install.packages('rsconnect')"
 
+      - name: Set app name based on event type
+        id: set_app
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "APP_NAME=biotoxin-validator-test" >> $GITHUB_ENV
+          else
+            echo "APP_NAME=biotoxin-validator" >> $GITHUB_ENV
+          fi
+
       - name: Deploy to shinyapps.io
         env:
           SHINYAPPS_USERNAME: ${{ secrets.SHINYAPPS_USERNAME }}
           SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
           SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
+          APP_NAME: ${{ env.APP_NAME }}
         run: |
           Rscript -e "library(rsconnect); rsconnect::setAccountInfo(name = Sys.getenv('SHINYAPPS_USERNAME'), token = Sys.getenv('SHINYAPPS_TOKEN'), secret = Sys.getenv('SHINYAPPS_SECRET'))"
-          Rscript -e "rsconnect::deployApp(appName = 'biotoxin-validator', forceUpdate = TRUE)"
+          Rscript -e "rsconnect::deployApp(appName = Sys.getenv('APP_NAME'), forceUpdate = TRUE)"
