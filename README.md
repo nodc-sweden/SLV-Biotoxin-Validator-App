@@ -28,7 +28,7 @@ remotes::install_deps()
 
 ### Running the App
 ```r
-shiny::runApp("app.R")
+shiny::runApp()
 ```
 
 ## Usage
