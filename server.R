@@ -757,6 +757,12 @@ server <- function(input, output, session) {
       # Drop NA columns
       processed <- processed[, colSums(!is.na(processed)) > 0]
       
+      # Extract date range
+      first_date <- as.Date(min(processed$SDATE, na.rm = TRUE))
+      last_date <- as.Date(max(processed$SDATE, na.rm = TRUE))
+      first_day <- as.Date(paste0(format(first_date, "%Y"), "-01-01"))
+      last_day <- as.Date(paste0(format(last_date, "%Y"), "-12-31"))
+      
       # Get headers from template
       template_headers <- get_template(input$sample_type, "Analysinfo")$headers
       
@@ -767,7 +773,9 @@ server <- function(input, output, session) {
       
       data_out <- template_headers %>%
         bind_rows(analysis_info) %>%
-        select(any_of(names(template_headers)))
+        select(any_of(names(template_headers))) %>%
+        mutate(VALIDFR = as.character(first_day),
+               VALIDTO = as.character(last_day))
       
       write.table(data_out, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
