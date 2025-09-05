@@ -1,4 +1,4 @@
-name: Deploy Shiny App to shinyapps.io
+name: Shiny Deploy
 
 on:
   push:
