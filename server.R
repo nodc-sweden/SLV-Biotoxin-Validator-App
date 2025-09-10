@@ -91,8 +91,7 @@ server <- function(input, output, session) {
   # Store site_df in a reactive object
   site_df_data <- reactive({
     validate(need(input$file_eurofins, "Waiting for file upload..."))
-    areas <- config_areas
-    
+
     # Just read enough of the uploaded file to extract sites
     df <- uploaded()
     
@@ -102,7 +101,7 @@ server <- function(input, output, session) {
       tibble(site = gsub("/", "", trimws(val$site)), number = as.character(val$number))
     })
     
-    site_df <- site_df %>% left_join(areas, by = c("number" = "Nummer"))
+    site_df <- site_df %>% left_join(config_areas, by = c("number" = "Nummer"))
     
     return(site_df)
   })
@@ -180,8 +179,7 @@ server <- function(input, output, session) {
     site_df <- site_df_data()
     data <- data()
     taxa <- taxa_data$taxa
-    areas <- config_areas
-    
+
     data_summary <- if (!is.null(input$file_slv_summary)) data_summary()$summary else NULL
     selected_unit_column <- get_selected_unit_column(input$sample_type)
     rename_map <- build_rename_map(toxin_list, data)
@@ -197,7 +195,7 @@ server <- function(input, output, session) {
     data <- clean_numeric_values(data, toxin_list, logical_cols)
     
     # Add metadata
-    data <- add_site_taxa_info(data, taxa, site_df, areas)
+    data <- add_site_taxa_info(data, taxa, site_df, config_areas)
     data_mapped <- apply_column_mapping(data, column_mapping)
     
     # Join data_summary if available
@@ -757,6 +755,12 @@ server <- function(input, output, session) {
       # Drop NA columns
       processed <- processed[, colSums(!is.na(processed)) > 0]
       
+      # Extract date range
+      first_date <- as.Date(min(processed$SDATE, na.rm = TRUE))
+      last_date <- as.Date(max(processed$SDATE, na.rm = TRUE))
+      first_day <- as.Date(paste0(format(first_date, "%Y"), "-01-01"))
+      last_day <- as.Date(paste0(format(last_date, "%Y"), "-12-31"))
+      
       # Get headers from template
       template_headers <- get_template(input$sample_type, "Analysinfo")$headers
       
@@ -767,7 +771,9 @@ server <- function(input, output, session) {
       
       data_out <- template_headers %>%
         bind_rows(analysis_info) %>%
-        select(any_of(names(template_headers)))
+        select(any_of(names(template_headers))) %>%
+        mutate(VALIDFR = as.character(first_day),
+               VALIDTO = as.character(last_day))
       
       write.table(data_out, file, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE, na = "", fileEncoding = "Windows-1252")
     }
