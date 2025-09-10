@@ -10,4 +10,5 @@ Imports:
     leaflet,
     worrms,
     DT,
-    memoise
+    memoise,
+    rsconnect
