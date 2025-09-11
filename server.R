@@ -336,9 +336,7 @@ server <- function(input, output, session) {
   output$table_raw <- renderDT({
     validate(need(input$file_eurofins, "Waiting for file upload..."))
     
-    df <- uploaded()
-    
-    datatable(df)
+    datatable(uploaded())
   })
   
   output$table_missing <- renderDT({
