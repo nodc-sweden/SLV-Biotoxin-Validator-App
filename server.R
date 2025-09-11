@@ -336,8 +336,7 @@ server <- function(input, output, session) {
   output$table_raw <- renderDT({
     validate(need(input$file_eurofins, "Waiting for file upload..."))
     
-    df <- data() %>%
-      select(-any_of(c("LATIT", "LONGI", "on_land")))
+    df <- uploaded()
     
     datatable(df)
   })
