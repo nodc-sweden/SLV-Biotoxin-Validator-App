@@ -279,7 +279,6 @@ server <- function(input, output, session) {
   })
   
   # ---- Observers for UI updates ----
-  
   # Update dropdown choices dynamically based on toxin_list
   observe({
     req(processed_data()$data)
