@@ -2,7 +2,7 @@
 # SERVER
 # ============================================
 server <- function(input, output, session) {
-
+  
   # ---- File input + basic parsing ----
   uploaded <- reactive({
     req(input$file_eurofins)
@@ -91,7 +91,7 @@ server <- function(input, output, session) {
   # Store site_df in a reactive object
   site_df_data <- reactive({
     validate(need(input$file_eurofins, "Waiting for file upload..."))
-
+    
     # Just read enough of the uploaded file to extract sites
     df <- uploaded()
     
@@ -179,7 +179,7 @@ server <- function(input, output, session) {
     site_df <- site_df_data()
     data <- data()
     taxa <- taxa_data$taxa
-
+    
     data_summary <- if (!is.null(input$file_slv_summary)) data_summary()$summary else NULL
     selected_unit_column <- get_selected_unit_column(input$sample_type)
     rename_map <- build_rename_map(toxin_list, data)
@@ -209,7 +209,7 @@ server <- function(input, output, session) {
     data_out <- template_headers %>%
       bind_rows(data_mapped %>% select(any_of(names(template_headers)))) %>%
       add_position_metadata(input$coordinate_output)
-
+    
     # Missing column diagnostics
     missing_columns <- identify_missing_columns(
       data_renamed, data_out, rename_map,
@@ -720,11 +720,46 @@ server <- function(input, output, session) {
   output$map <- renderLeaflet({
     validate(need(input$file_eurofins, "Waiting for file upload..."))
     
+    # Remove points with missing position
     df_map <- data() %>%
       filter(!is.na(LATIT) & !is.na(LONGI))
+    
+    # Find all unique reported production areas
+    site_df <- site_df_data() %>%
+      distinct()
+    
+    # Use helper for converting midpoint coordinates to DD
+    site_df <- compute_coordinates(
+      site_df,
+      coordinate_column = "",
+      coordinate_output = "midpoint",
+      midpoint_cols = c("Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99")
+    ) %>%
+      filter(!is.na(LATIT) & !is.na(LONGI))
+    
+    # Create leaflet map
     leaflet(df_map) %>%
       addTiles() %>%
+      
+      # Add production areas as mipoint and uncertainty
+      addCircles(
+        data = site_df,
+        lng = ~LONGI,
+        lat = ~LATIT,
+        radius = ~COORDINATE_UNCERTAINTY_M,   # meters
+        color = "orange",
+        fillColor = "orange",
+        fillOpacity = 0.2,
+        weight = 1,
+        popup = ~paste(
+          "Produktionsområde:", `Produktionsområde`, number, 
+          "<br>Positionsosäkerhet:", COORDINATE_UNCERTAINTY_M, "m"),
+        group = "Production areas"
+      ) %>%
+      
+      # Add sampling markers from df_map
       addCircleMarkers(
+        data = df_map,
         ~LONGI, ~LATIT,
         radius = 5,
         color = ~ifelse(on_land == TRUE, "red", "blue"),
@@ -735,7 +770,15 @@ server <- function(input, output, session) {
           "<br>Provtagningsdatum:", `Provtagningsdatum:`,
           "<br>Provtagningsplats:", `Provtagningsplats:`,
           "<br>Provmärkning:", `Provmärkning`
-        )      )
+        ),
+        group = "Samples"
+      ) %>%
+      
+      # add a layer control to toggle
+      addLayersControl(
+        overlayGroups = c("Production areas", "Samples"),
+        options = layersControlOptions(collapsed = FALSE)
+      )
   })
   
   # Download
