@@ -6,13 +6,25 @@ server <- function(input, output, session) {
   # ---- File input + basic parsing ----
   uploaded <- reactive({
     req(input$file_eurofins)
-    read_with_headers(input$file_eurofins$datapath, skip = 1)
+    df <- read_with_headers(input$file_eurofins$datapath, skip = 1)
+    
+    # Modiy date format if in numeric
+    df[["Provtagningsdatum:"]] <- ifelse(
+      grepl("^[0-9]+$", df[["Provtagningsdatum:"]]),                         # numeric Excel dates
+      as.character(as.Date(as.numeric(df[["Provtagningsdatum:"]]), origin = "1899-12-30")),  # convert
+      df[["Provtagningsdatum:"]]                                            # leave as is
+    )
+    
+    df$`Provtagningsdatum:` <- as.Date(df$`Provtagningsdatum:`)
+    df$`Provtagningsdatum:` <- as.character(df$`Provtagningsdatum:`)
+    
+    df
   })
   
   data_summary <- reactive({
     req(input$file_slv_summary)
     # Read file
-    df <- read_excel(input$file_slv_summary$datapath, .name_repair = "none", progress = FALSE)
+    df <- read_excel(input$file_slv_summary$datapath, .name_repair = "none", progress = FALSE, col_types = "text")
     
     # Extract filename
     filename <- basename(input$file_slv_summary$name)
@@ -41,12 +53,12 @@ server <- function(input, output, session) {
     
     # Process dataframe
     df <- df %>%
-      mutate(SDATE = as.character(make_date(year = År, month = Mån, day = Dat))) %>%
-      select(SDATE, Havsområde, Nr, Art, `V/O`) %>%
-      filter(complete.cases(.))
-    
-    taxa <- df %>% select(Art) %>% distinct()
-    taxa_names <- taxa$Art
+      mutate(SDATE = as.character(make_date(year = as.numeric(År), month = as.numeric(Mån), day = as.numeric(Dat)))) %>%
+               select(SDATE, Havsområde, Nr, Art, `V/O`) %>%
+               filter(complete.cases(.))
+             
+             taxa <- df %>% select(Art) %>% distinct()
+             taxa_names <- taxa$Art
     records <- tibble(Art = character(),
                       AphiaID = integer(),
                       scientificname = character())
@@ -94,6 +106,13 @@ server <- function(input, output, session) {
     
     # Just read enough of the uploaded file to extract sites
     df <- uploaded()
+    
+    # # Modiy date format if in numeric
+    # df[["Provtagningsdatum:"]] <- ifelse(
+    #   grepl("^[0-9]+$", df[["Provtagningsdatum:"]]),                         # numeric Excel dates
+    #   as.character(as.Date(as.numeric(df[["Provtagningsdatum:"]]), origin = "1899-12-30")),  # convert
+    #   df[["Provtagningsdatum:"]]                                            # leave as is
+    # )
     
     # Extract site and number to each entry in the data frame
     site_df <- purrr::map_dfr(df$`Provtagningsplats:`, function(x) {
@@ -198,6 +217,9 @@ server <- function(input, output, session) {
     data <- add_site_taxa_info(data, taxa, site_df, config_areas)
     data_mapped <- apply_column_mapping(data, column_mapping)
     
+    # data_mapped$SDATE <- as.Date(data_mapped$SDATE)
+    # data_mapped$SDATE <- as.character(data_mapped$SDATE)
+
     # Join data_summary if available
     if (!is.null(data_summary)) {
       data_mapped <- data_mapped %>%
