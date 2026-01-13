@@ -271,7 +271,7 @@ apply_column_mapping <- function(data, column_mapping) {
     mutate(
       ORDERER = recode(ORDERER, "Livsmedelsverket" = "SLV"),
       PROJ = "SLV",
-      MYEAR = lubridate::year(SDATE)
+      MYEAR = lubridate::year(as.Date(SDATE))
     ) %>%
     mutate(across(everything(), as.character))
 }
