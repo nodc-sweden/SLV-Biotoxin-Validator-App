@@ -173,10 +173,17 @@ compute_coordinates <- function(df, coordinate_column, coordinate_output = c("ac
   
   # First try to parse raw DDMM strings if present
   if (coordinate_output == "actual" && coordinate_column %in% names(df)) {
-    # Avoid hardcoding substr indices: parse with regex or safe string ops if format is consistent
+    # Validate coordinate format before parsing
+    coord_values <- df[[coordinate_column]]
+    valid_format <- validate_coordinate_format(coord_values)
+
     df <- df %>% mutate(
-      LATIT = convert_ddmm_to_dd(substr(.[[coordinate_column]], 1, 6)),
-      LONGI = convert_ddmm_to_dd(substr(.[[coordinate_column]], 8, 13))
+      LATIT = ifelse(valid_format,
+                     convert_ddmm_to_dd(substr(.[[coordinate_column]], 1, 6)),
+                     NA_real_),
+      LONGI = ifelse(valid_format,
+                     convert_ddmm_to_dd(substr(.[[coordinate_column]], 8, 13)),
+                     NA_real_)
     )
   } else if (coordinate_output == "midpoint" && all(midpoint_cols %in% names(df))) {
     # transform only rows with valid midpoint coordinates
@@ -229,14 +236,14 @@ get_logical_cols <- function(toxin_list) {
 # Clean logical values
 clean_logical_values <- function(data, logical_cols, rename_map) {
   data %>%
-    mutate(across(all_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
-      . == "Ej påvisad" ~ FALSE, 
+    mutate(across(any_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
+      . == "Ej påvisad" ~ FALSE,
       . == "~PV0016C" ~ FALSE,
       . == "Påvisad" ~ TRUE,
       TRUE ~ NA_real_
     ))) %>%
-    rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
-    mutate(across(all_of(logical_cols$Kortnamn_MH), as.logical))
+    rename_with(~ rename_map[.x], .cols = any_of(names(rename_map))) %>%
+    mutate(across(any_of(logical_cols$Kortnamn_MH), as.logical))
 }
 
 # Clean numeric toxin values (remove "<", coerce to numeric, keep Q_ columns)

@@ -13,6 +13,7 @@ require(memoise)
 
 # ---- Helper functions ----
 source("R/helper.R")
+source("R/validate_columns.R")
 
 # ---- App metadata ----
 pkg_version <- read.dcf("DESCRIPTION", fields = "Version")[1]
