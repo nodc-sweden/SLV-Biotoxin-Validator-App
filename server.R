@@ -7,17 +7,28 @@ server <- function(input, output, session) {
   uploaded <- reactive({
     req(input$file_eurofins)
     df <- read_with_headers(input$file_eurofins$datapath, skip = 1)
-    
-    # Modiy date format if in numeric
-    df[["Provtagningsdatum:"]] <- ifelse(
-      grepl("^[0-9]+$", df[["Provtagningsdatum:"]]),                         # numeric Excel dates
-      as.character(as.Date(as.numeric(df[["Provtagningsdatum:"]]), origin = "1899-12-30")),  # convert
-      df[["Provtagningsdatum:"]]                                            # leave as is
-    )
-    
-    df$`Provtagningsdatum:` <- as.Date(df$`Provtagningsdatum:`)
-    df$`Provtagningsdatum:` <- as.character(df$`Provtagningsdatum:`)
-    
+
+    # Validate critical columns exist
+    critical_cols <- c("Provtagningsdatum:", "Provtagningsplats:", "Provmärkning")
+    tryCatch({
+      validate_critical_columns(df, critical_cols)
+    }, error = function(e) {
+      showNotification(paste("Upload Error:", e$message), type = "error", duration = 10)
+      return(NULL)
+    })
+
+    # Safely modify date format if column exists and contains data
+    if ("Provtagningsdatum:" %in% names(df) && any(!is.na(df[["Provtagningsdatum:"]]))) {
+      df[["Provtagningsdatum:"]] <- ifelse(
+        grepl("^[0-9]+$", df[["Provtagningsdatum:"]]),                         # numeric Excel dates
+        as.character(as.Date(as.numeric(df[["Provtagningsdatum:"]]), origin = "1899-12-30")),  # convert
+        df[["Provtagningsdatum:"]]                                            # leave as is
+      )
+
+      df$`Provtagningsdatum:` <- as.Date(df$`Provtagningsdatum:`)
+      df$`Provtagningsdatum:` <- as.character(df$`Provtagningsdatum:`)
+    }
+
     df
   })
   
@@ -53,7 +64,7 @@ server <- function(input, output, session) {
     
     # Process dataframe
     df <- df %>%
-      mutate(SDATE = as.character(make_date(year = as.numeric(År), month = as.numeric(Mån), day = as.numeric(Dat)))) %>%
+      mutate(SDATE = as.character(safe_make_date(År, Mån, Dat))) %>%
                select(SDATE, Havsområde, Nr, Art, `V/O`) %>%
                filter(complete.cases(.))
              
@@ -115,7 +126,10 @@ server <- function(input, output, session) {
     # )
     
     # Extract site and number to each entry in the data frame
-    site_df <- purrr::map_dfr(df$`Provtagningsplats:`, function(x) {
+    # Use safe column access to handle missing site column
+    site_values <- safe_column_access(df, "Provtagningsplats:", default_value = "")
+
+    site_df <- purrr::map_dfr(site_values, function(x) {
       val <- extract_site_and_number(x)
       tibble(site = gsub("/", "", trimws(val$site)), number = as.character(val$number))
     })
@@ -170,8 +184,15 @@ server <- function(input, output, session) {
   # Update `taxa` within reactive functions
   observe({
     df <- data()
-    taxa <- df %>% select(Provmärkning) %>% distinct()
-    taxa_names <- taxa$Provmärkning
+
+    # Safely extract taxa, handling missing column
+    if ("Provmärkning" %in% names(df)) {
+      taxa <- df %>% select(Provmärkning) %>% distinct()
+      taxa_names <- taxa$Provmärkning
+    } else {
+      showNotification("Taxa column 'Provmärkning' not found in data", type = "warning")
+      taxa_names <- character(0)
+    }
     
     # Use your memoised bulk fetcher instead of looping
     records <- withProgress(message = "Looking up taxa in WoRMS...", value = 0, {
@@ -251,10 +272,14 @@ server <- function(input, output, session) {
     site_df <- site_df_data()
     processed_df <- processed_data()$data
     
-    # Date issues
-    date_issues <- df %>%
-      filter(is.na(`Provtagningsdatum:`)) %>%
-      nrow()
+    # Date issues - safely check for date column
+    date_issues <- if ("Provtagningsdatum:" %in% names(df)) {
+      df %>%
+        filter(is.na(`Provtagningsdatum:`)) %>%
+        nrow()
+    } else {
+      nrow(df)  # If no date column, all rows are problematic
+    }
     
     # Coordinate issues
     coord_issues <- df %>%
@@ -552,7 +577,13 @@ server <- function(input, output, session) {
       showNotification(paste("Selected parameter", param, "has no data or doesn't exist."), type = "error")
       return(NULL)
     }
-    
+
+    # Check if parameter column exists in dataframe
+    if (!(param %in% names(df))) {
+      showNotification(paste("Selected parameter", param, "is not found in the data."), type = "error")
+      return(NULL)
+    }
+
     if (is.logical(df[[param]])) {
       showNotification("Selected parameter is logical (TRUE/FALSE) and cannot be plotted.", type = "error")
       return(NULL)
@@ -670,7 +701,13 @@ server <- function(input, output, session) {
       showNotification(paste("Selected parameter", param, "has no data or doesn't exist."), type = "error")
       return(NULL)
     }
-    
+
+    # Check if parameter column exists in dataframe
+    if (!(param %in% names(df))) {
+      showNotification(paste("Selected parameter", param, "is not found in the data."), type = "error")
+      return(NULL)
+    }
+
     if (is.logical(df[[param]])) {
       showNotification("Selected parameter is logical (TRUE/FALSE) and cannot be plotted.", type = "error")
       return(NULL)
