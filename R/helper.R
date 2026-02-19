@@ -229,14 +229,14 @@ get_logical_cols <- function(toxin_list) {
 # Clean logical values
 clean_logical_values <- function(data, logical_cols, rename_map) {
   data %>%
-    mutate(across(all_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
-      . == "Ej påvisad" ~ FALSE, 
+    mutate(across(any_of(logical_cols$`Rapporterat-parameternamn`), ~ case_when(
+      . == "Ej påvisad" ~ FALSE,
       . == "~PV0016C" ~ FALSE,
       . == "Påvisad" ~ TRUE,
       TRUE ~ NA_real_
     ))) %>%
-    rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
-    mutate(across(all_of(logical_cols$Kortnamn_MH), as.logical))
+    rename_with(~ rename_map[.x], .cols = any_of(names(rename_map))) %>%
+    mutate(across(any_of(logical_cols$Kortnamn_MH), as.logical))
 }
 
 # Clean numeric toxin values (remove "<", coerce to numeric, keep Q_ columns)

@@ -206,7 +206,7 @@ server <- function(input, output, session) {
     
     # For missing column tracking later
     data_renamed <- data %>%
-      rename_with(~ rename_map[.x], .cols = all_of(names(rename_map))) %>%
+      rename_with(~ rename_map[.x], .cols = any_of(names(rename_map))) %>%
       select(where(~ !all(is.na(.))))
     
     # Clean values
@@ -562,13 +562,13 @@ server <- function(input, output, session) {
     
     # Filter data for selected parameter
     df_param <- df %>%
-      select(SDATE, LATNM, all_of(param), all_of(q_col)) %>%
-      drop_na(all_of(param)) %>%
-      filter(!if_all(all_of(param), is.na)) %>%
+      select(SDATE, LATNM, any_of(param), any_of(q_col)) %>%
+      drop_na(any_of(param)) %>%
+      filter(!if_all(any_of(param), is.na)) %>%
       mutate(
         SDATE = as.Date(SDATE),
         LATNM = as.character(LATNM),
-        across(all_of(param), as.numeric)
+        across(any_of(param), as.numeric)
       ) %>%
       filter(!is.infinite(!!sym(param)))
     
@@ -679,16 +679,16 @@ server <- function(input, output, session) {
     # Prepare data for mapping
     if (taxa == "All taxa") {
       df_map <- df %>%
-        select(LONGI, LATIT, all_of(param)) %>%
-        drop_na(LONGI, LATIT, all_of(param)) %>%
-        mutate(across(all_of(param), as.numeric)) %>%
+        select(LONGI, LATIT, any_of(param)) %>%
+        drop_na(LONGI, LATIT, any_of(param)) %>%
+        mutate(across(any_of(param), as.numeric)) %>%
         filter(!is.infinite(!!sym(param)))
     } else {
       df_map <- df %>%
         filter(LATNM == taxa) %>%
-        select(LONGI, LATIT, all_of(param)) %>%
-        drop_na(LONGI, LATIT, all_of(param)) %>%
-        mutate(across(all_of(param), as.numeric)) %>%
+        select(LONGI, LATIT, any_of(param)) %>%
+        drop_na(LONGI, LATIT, any_of(param)) %>%
+        mutate(across(any_of(param), as.numeric)) %>%
         filter(!is.infinite(!!sym(param)))
     }
     
