@@ -846,7 +846,7 @@ server <- function(input, output, session) {
   )
   
   output$download_analysis_info <- downloadHandler(
-    filename = function() { "analysis_info.txt" },
+    filename = function() { "analyse_info.txt" },
     content = function(file) {
       processed <- processed_data()$data
       
