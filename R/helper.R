@@ -1,176 +1,95 @@
-# Determine if Positions are Near Land
-is_near_land <- function(latitudes,
-                         longitudes,
-                         distance = 500,
-                         shape = NULL,
-                         crs = 4326,
-                         utm_zone = 33,
-                         remove_small_islands = TRUE,
-                         small_island_threshold = 2000000) {
-  
-  # Check for NAs in latitudes and longitudes
-  na_positions <- is.na(latitudes) | is.na(longitudes)
-  
-  # Create a result vector initialized to NA
-  result <- rep(NA, length(latitudes))
-  
-  # If all positions are NA, return the result early
-  if (all(na_positions)) {
-    return(result)
-  }
-  
-  # Filter out NA positions for further processing
-  latitudes_filtered <- latitudes[!na_positions]
-  longitudes_filtered <- longitudes[!na_positions]
-  
+# ---- Coastline precomputation and land checks ----
+
+# Precompute the buffered coastline geometry once at startup
+precompute_coastline_buffer <- function(shape,
+                                        distance = -10,
+                                        crs = 4326,
+                                        utm_zone = 33,
+                                        remove_small_islands = TRUE,
+                                        small_island_threshold = 2000000) {
   utm_epsg <- paste0("epsg:", 32600 + utm_zone)
-  
-  # Create a bounding box around the coordinates with a buffer
-  bbox <- st_bbox(c(xmin = min(longitudes_filtered) - 1, xmax = max(longitudes_filtered) + 1,
-                    ymin = min(latitudes_filtered) - 1, ymax = max(latitudes_filtered) + 1),
-                  crs = st_crs(crs))
-  
-  # Get coastline
-  if (is.null(shape)) {
-    # Directory to extract files
-    exdir <- tempdir()  # Temporary directory
-    
-    # Extract the files
-    unzip(system.file("exdata/ne_50m_land.zip", package = "iRfcb"), exdir = exdir)
-    
-    # Get coastline and land data within the bounding box
-    land <- st_read(file.path(exdir, "ne_50m_land.shp"), quiet = TRUE)
-  } else {
-    land <- st_transform(shape, crs = crs)
-  }
-  
-  # Check geometry type
-  geom_type <- unique(st_geometry_type(land))
-  
+
+  land <- st_transform(shape, crs = crs)
+
   # Optionally remove small islands based on area threshold
-  if (!is.null(shape) && remove_small_islands && any(st_geometry_type(land) %in% c("POLYGON", "MULTIPOLYGON"))) {
+  if (remove_small_islands && any(st_geometry_type(land) %in% c("POLYGON", "MULTIPOLYGON"))) {
     land$area <- st_area(land)
-    
     small_islands <- which(as.numeric(land$area) < small_island_threshold)
-    land <- land[-small_islands, ]
-    
-    # Remove the 'area' attribute
+    if (length(small_islands) > 0) {
+      land <- land[-small_islands, ]
+    }
     land$area <- NULL
   }
-  
-  # Filter land data to include only the region within the bounding box
-  land <- suppressWarnings(st_intersection(land, st_as_sfc(bbox)))
-  
-  # Cleanup and transform land data
+
+  # Union, validate, transform, buffer
   land <- land %>% st_union() %>% st_make_valid() %>% st_wrap_dateline()
   land_utm <- st_transform(land, crs = utm_epsg)
-  
-  # Create a buffered shape around the coastline in meters (specified distance)
+
   l_buffer <- terra::vect(land_utm)
   terra::crs(l_buffer) <- utm_epsg
   l_buffer <- terra::buffer(l_buffer, width = distance) %>% st_as_sf()
-  
-  # Apply st_wrap_dateline only if the CRS is geographic
-  if (st_crs(l_buffer)$epsg == crs) {
-    l_buffer <- l_buffer %>% st_wrap_dateline()
-  }
-  
-  # Transform the buffered coastline and land data back to the original CRS
+
+  # Transform back to WGS84
   l_buffer <- st_transform(l_buffer, crs = crs)
-  
-  # Create sf object for positions
-  positions_sf <- st_as_sf(data.frame(lon = longitudes_filtered, lat = latitudes_filtered),
-                           coords = c("lon", "lat"), crs = st_crs(crs))
-  
-  # Check which positions intersect with the buffer and land
-  near_land <- st_intersects(positions_sf, l_buffer)
-  
-  # Extract logical vectors indicating whether each position is near land or on land
-  near_land_logical <- lengths(near_land) > 0
-  
-  # Assign results back to the appropriate positions in the result vector
-  result[!na_positions] <- near_land_logical
-  
-  # Return the logical vector indicating near land with NAs for original NA positions
+
+  l_buffer
+}
+
+# Determine if positions are near land using precomputed buffer
+is_near_land <- function(latitudes, longitudes, precomputed_buffer) {
+  na_positions <- is.na(latitudes) | is.na(longitudes)
+  result <- rep(NA, length(latitudes))
+
+  if (all(na_positions)) {
+    return(result)
+  }
+
+  latitudes_filtered <- latitudes[!na_positions]
+  longitudes_filtered <- longitudes[!na_positions]
+
+  positions_sf <- st_as_sf(
+    data.frame(lon = longitudes_filtered, lat = latitudes_filtered),
+    coords = c("lon", "lat"), crs = st_crs(4326)
+  )
+
+  near_land <- st_intersects(positions_sf, precomputed_buffer)
+  result[!na_positions] <- lengths(near_land) > 0
+
   return(result)
 }
+
+# ---- Coordinate helpers ----
 
 # Function to convert DDMM coordinates to decimal degrees
 convert_ddmm_to_dd <- function(coord) {
   coord <- as.character(coord)  # Ensure input is character
   coord <- gsub("[^0-9]", "", coord)  # Remove non-numeric characters
-  
+
   # Handle cases where input is too short
   coord[nchar(coord) < 6] <- NA
-  
+
   # Extract components safely
   deg <- suppressWarnings(as.numeric(substr(coord, 1, 2)))
   min <- suppressWarnings(as.numeric(substr(coord, 3, 4)))
   min_decimals <- suppressWarnings(as.numeric(substr(coord, 5, 6)))
-  
+
   # Handle cases where conversion fails
   valid <- !(is.na(deg) | is.na(min) | is.na(min_decimals))
-  
+
   min_with_decimals <- ifelse(valid, min + (min_decimals / 100), NA)
   decimal_degrees <- ifelse(valid, deg + (min_with_decimals / 60), NA)
-  
+
   return(decimal_degrees)
-}
-
-# Function to extract site and number from a string
-extract_site_and_number <- function(input_string) {
-  # Regex to extract the first 3-digit number in the string
-  match <- regmatches(input_string, regexpr("\\b(\\d{3})\\b", input_string))
-  
-  if (length(match) == 0) {
-    return(list(site = input_string, number = NA))  # No 3-digit number found
-  }
-  
-  # Extract everything before the first 3-digit number as site name
-  site_name <- sub("\\s*\\d{3}.*$", "", input_string) 
-  
-  number <- as.numeric(match)  # Convert extracted number to numeric
-  
-  return(list(site = trimws(site_name), number = number))
-}
-
-# Function to read Excel files with headers in the first row
-read_with_headers <- function(path, skip = 1) {
-  df <- read_excel(path, skip = skip, .name_repair = "none", progress = FALSE)
-  header <- names(read_excel(path, .name_repair = "none", progress = FALSE))
-  colnames(df)[colnames(df) == ""] <- header[colnames(df) == ""]
-  df
-}
-
-# Memoised WoRMS calls (reduces repeated API calls)
-# Wrap wm_records_name in a safe memoised function
-safe_wm_records_name <- memoise::memoise(function(name, fuzzy = FALSE) {
-  tryCatch(wm_records_name(name, fuzzy = fuzzy), error = function(e) NULL)
-})
-
-# Fetch taxa info for vector of names
-fetch_worms_for_taxa <- function(taxa_names, name_col = "Art", target_col_name = "scientificname") {
-  if (length(taxa_names) == 0) return(tibble(!!name_col := character(), AphiaID = integer(), scientificname = character()))
-  res <- purrr::map_dfr(taxa_names, function(nm) {
-    rec <- safe_wm_records_name(nm, fuzzy = FALSE)
-    if (is.null(rec) || nrow(rec) == 0) {
-      tibble(!!name_col := nm, AphiaID = NA_integer_, scientificname = nm)
-    } else {
-      # wm_records_name often returns a data.frame; take first row (or adapt as needed)
-      tibble(!!name_col := nm, AphiaID = rec$AphiaID[1], scientificname = rec$scientificname[1])
-    }
-  })
-  res
 }
 
 # Compute lat/lon robustly (handles midpoints or raw coords)
 compute_coordinates <- function(df, coordinate_column, coordinate_output = c("actual", "midpoint"), midpoint_cols = c("Mittpunkt_E_SWEREF99","Mittpunkt_N_SWEREF99")) {
   coordinate_output <- match.arg(coordinate_output)
-  
+
   # Always preallocate columns so they exist
   df$LONGI <- NA_real_
   df$LATIT <- NA_real_
-  
+
   # First try to parse raw DDMM strings if present
   if (coordinate_output == "actual" && coordinate_column %in% names(df)) {
     # Validate coordinate format before parsing
@@ -197,19 +116,127 @@ compute_coordinates <- function(df, coordinate_column, coordinate_output = c("ac
   }
   df$LONGI <- round(df$LONGI, 4)
   df$LATIT <- round(df$LATIT, 4)
+
+  # Flag coordinates outside plausible Sweden bounding box
+  out_of_bounds <- !is.na(df$LATIT) & !is.na(df$LONGI) &
+    (df$LATIT < 54 | df$LATIT > 70 | df$LONGI < 9 | df$LONGI > 26)
+  n_out <- sum(out_of_bounds, na.rm = TRUE)
+  if (n_out > 0) {
+    warning(n_out, " coordinate(s) fall outside plausible Sweden bounding box (54-70N, 9-26E)")
+    df$LATIT[out_of_bounds] <- NA_real_
+    df$LONGI[out_of_bounds] <- NA_real_
+  }
+
   df
 }
+
+# ---- Site extraction ----
+
+# Function to extract site and number from a string
+extract_site_and_number <- function(input_string) {
+  # Regex to extract the first 3-digit number in the string
+  match <- regmatches(input_string, regexpr("\\b(\\d{3})\\b", input_string))
+
+  if (length(match) == 0) {
+    return(list(site = input_string, number = NA))  # No 3-digit number found
+  }
+
+  # Extract everything before the first 3-digit number as site name
+  site_name <- sub("\\s*\\d{3}.*$", "", input_string)
+
+  number <- as.numeric(match)  # Convert extracted number to numeric
+
+  return(list(site = trimws(site_name), number = number))
+}
+
+# Build a site lookup table from site values, keyed by the original string
+build_site_lookup <- function(site_values, config_areas) {
+  site_df <- purrr::map_dfr(unique(site_values), function(x) {
+    val <- extract_site_and_number(x)
+    tibble(
+      `Provtagningsplats:` = x,
+      site = gsub("/", "", trimws(val$site)),
+      number = as.character(val$number)
+    )
+  })
+
+  site_df %>% left_join(config_areas, by = c("number" = "Nummer"))
+}
+
+# ---- File reading ----
+
+# Function to read Excel files with headers in the first row
+# The Excel has two header rows: row 1 = supplementary, row 2 = main.
+# We read with skip to get main headers, then read again to fill gaps from row 1.
+read_with_headers <- function(path, skip = 1) {
+  if (!file.exists(path)) {
+    stop("File not found: ", path)
+  }
+  df <- tryCatch(
+    read_excel(path, skip = skip, .name_repair = "none", progress = FALSE),
+    error = function(e) stop("Failed to read Excel file: ", e$message)
+  )
+  if (nrow(df) == 0) {
+    stop("Uploaded file is empty or has no data rows")
+  }
+  # Get supplementary header from row 1 to fill gaps
+  header <- names(read_excel(path, .name_repair = "none", progress = FALSE))
+  empty_cols <- colnames(df) == "" | is.na(colnames(df))
+  colnames(df)[empty_cols] <- header[empty_cols]
+
+  # Replace any still-empty names with positional placeholders
+  still_empty <- names(df) == "" | is.na(names(df))
+  if (any(still_empty)) {
+    names(df)[still_empty] <- paste0("X_", which(still_empty))
+  }
+
+  # Ensure column names are unique (Excel files often have duplicate headers)
+  names(df) <- make.unique(names(df))
+  df
+}
+
+# ---- WoRMS API ----
+
+# Memoised WoRMS calls — failures are NOT cached so retries work within a session
+safe_wm_records_name <- memoise::memoise(function(name, fuzzy = FALSE) {
+  result <- tryCatch(wm_records_name(name, fuzzy = fuzzy), error = function(e) NULL)
+  if (is.null(result)) stop("WoRMS lookup failed for: ", name)
+  result
+})
+
+# Fetch taxa info for vector of names
+fetch_worms_for_taxa <- function(taxa_names, name_col = "Art", target_col_name = "scientificname") {
+  if (length(taxa_names) == 0) return(tibble(!!name_col := character(), AphiaID = integer(), scientificname = character()))
+  res <- purrr::map_dfr(taxa_names, function(nm) {
+    rec <- tryCatch(safe_wm_records_name(nm, fuzzy = FALSE), error = function(e) NULL)
+    if (is.null(rec) || nrow(rec) == 0) {
+      tibble(!!name_col := nm, AphiaID = NA_integer_, scientificname = nm)
+    } else {
+      # wm_records_name often returns a data.frame; take first row (or adapt as needed)
+      tibble(!!name_col := nm, AphiaID = rec$AphiaID[1], scientificname = rec$scientificname[1])
+    }
+  })
+  res
+}
+
+# ---- Template and config helpers ----
 
 # Read formatmall template and extract headers
 get_template <- function(sample_type, sheet = NULL) {
   # Read from disk
   file_to_use <- paste0("config/Format_Marine_Biotoxin_", sample_type, ".xlsx")
-  template <- readxl::read_excel(file_to_use, skip = 2, progress = FALSE, sheet)[-1]
-  
+  if (!file.exists(file_to_use)) {
+    stop("Template file not found: ", file_to_use)
+  }
+  template <- tryCatch(
+    readxl::read_excel(file_to_use, skip = 2, progress = FALSE, sheet)[-1],
+    error = function(e) stop("Failed to read template '", file_to_use, "': ", e$message)
+  )
+
   # Convert headers
   template_headers <- template[0, ] %>%
     dplyr::mutate(across(everything(), as.character))
-  
+
   # Return list
   list(
     template = template,
@@ -232,6 +259,8 @@ build_rename_map <- function(toxin_list, data) {
 get_logical_cols <- function(toxin_list) {
   toxin_list %>% filter(Enhet_MH_kg == "true or false")
 }
+
+# ---- Data cleaning ----
 
 # Clean logical values
 clean_logical_values <- function(data, logical_cols, rename_map) {
@@ -260,14 +289,17 @@ clean_numeric_values <- function(data, toxin_list, logical_cols) {
   data
 }
 
-# Add site and taxa info
-add_site_taxa_info <- function(data, taxa, site_df, areas) {
+# ---- Metadata enrichment ----
+
+# Add site and taxa info via key-based join
+add_site_taxa_info <- function(data, taxa, site_lookup, areas) {
   data %>%
     left_join(taxa, by = "Provmärkning") %>%
-    mutate(
-      PROD_AREA = site_df$Produktionsområde,
-      PROD_AREA_ID = site_df$number
+    left_join(
+      site_lookup %>% select(`Provtagningsplats:`, Produktionsområde, number),
+      by = "Provtagningsplats:"
     ) %>%
+    rename(PROD_AREA = Produktionsområde, PROD_AREA_ID = number) %>%
     left_join(areas, by = c("PROD_AREA_ID" = "Nummer"))
 }
 
@@ -293,7 +325,7 @@ add_position_metadata <- function(data, coordinate_output) {
         TRUE ~ NA_character_
       ),
       COMNT_VISIT = case_when(
-        !is.na(LATIT) & !is.na(LONGI) & coordinate_output == "midpoint" ~ 
+        !is.na(LATIT) & !is.na(LONGI) & coordinate_output == "midpoint" ~
           "The given position is the centroid point of the production area. Data is collected from the entire area, and the coordinate uncertainty reflects the extent of this area.",
         !is.na(LATIT) & !is.na(LONGI) & coordinate_output != "midpoint" ~ NA,
         TRUE ~ NA
@@ -305,29 +337,29 @@ add_position_metadata <- function(data, coordinate_output) {
 }
 
 # Identify missing columns
-identify_missing_columns <- function(data_renamed, data_out, rename_map, 
+identify_missing_columns <- function(data_renamed, data_out, rename_map,
                                      unused_columns, column_mapping,
                                      coordinate_column, site_column, taxa_column,
                                      toxin_list, selected_unit_column) {
   problem_columns <- names(data_renamed)[!names(data_renamed) %in% names(data_out)]
-  
+
   problem_columns <- setdiff(problem_columns,
-                             c("LATIT", "LONGI", "on_land", 
+                             c("LATIT", "LONGI", "on_land",
                                "Mittpunkt_E_SWEREF99", "Mittpunkt_N_SWEREF99",
                                unused_columns, column_mapping, coordinate_column, site_column, taxa_column)
   )
-  
+
   reverse_map <- setNames(names(rename_map), rename_map)
   renamed_columns <- vapply(problem_columns, function(x) {
     if (x %in% names(reverse_map)) reverse_map[x] else x
   }, FUN.VALUE = character(1))
-  
+
   missing_columns <- tibble("Uninitialized column" = renamed_columns,
                             "Column key" = problem_columns)
-  
+
   units <- toxin_list %>%
     select(Kortnamn_MH, !!sym(selected_unit_column)) %>%
     rename(Unit = !!sym(selected_unit_column))
-  
+
   missing_columns %>% left_join(units, by = c("Column key" = "Kortnamn_MH"))
 }
