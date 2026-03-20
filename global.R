@@ -2,18 +2,27 @@
 # (before ui.R and server.R are loaded)
 
 # ---- Libraries ----
-require(shiny)
-require(tidyverse)
-require(readxl)
-require(sf)
-require(leaflet)
-require(worrms)
-require(DT)
-require(memoise)
+library(shiny)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(purrr)
+library(lubridate)
+library(readxl)
+library(sf)
+library(leaflet)
+library(worrms)
+library(DT)
+library(memoise)
+
+# ---- Max upload size (20 MB) ----
+options(shiny.maxRequestSize = 20 * 1024^2)
 
 # ---- Helper functions ----
 source("R/helper.R")
 source("R/validate_columns.R")
+source("R/plotting.R")
 
 # ---- App metadata ----
 pkg_version <- read.dcf("DESCRIPTION", fields = "Version")[1]
@@ -34,6 +43,26 @@ taxa_column <- "Provmärkning"
 unused_columns <- c("Ankomstdatum", "Prov validerat den", "Eurofins provnummer", "Provets status")
 
 # Read in static configuration files
-config_areas <- read_excel("config/production_areas.xlsx", progress = FALSE)
-toxin_list   <- read_excel("config/lista_toxiner.xlsx", progress = FALSE)
-coastline    <- st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE)
+config_areas <- tryCatch(
+  read_excel("config/production_areas.xlsx", progress = FALSE),
+  error = function(e) stop("Failed to read config/production_areas.xlsx: ", e$message)
+)
+toxin_list <- tryCatch(
+  read_excel("config/lista_toxiner.xlsx", progress = FALSE),
+  error = function(e) stop("Failed to read config/lista_toxiner.xlsx: ", e$message)
+)
+coastline <- tryCatch(
+  st_read("data/shapefiles/EEA_Coastline_Sweden_WestCoast.shp", quiet = TRUE),
+  error = function(e) stop("Failed to read coastline shapefile: ", e$message)
+)
+
+# ---- Precompute coastline buffer for is_near_land ----
+# This avoids expensive spatial operations (union, buffer, transform) on every upload
+coastline_buffer <- precompute_coastline_buffer(
+  coastline,
+  distance = -10,
+  crs = 4326,
+  utm_zone = 33,
+  remove_small_islands = TRUE,
+  small_island_threshold = 2000000
+)

@@ -42,3 +42,20 @@ safe_make_date <- function(year, month, day) {
     return(as.Date(NA))
   })
 }
+
+# Validate that dates fall within a plausible range
+validate_date_plausibility <- function(date_strings) {
+  dates <- suppressWarnings(as.Date(date_strings))
+  current_year <- as.integer(format(Sys.Date(), "%Y"))
+  min_date <- as.Date("2000-01-01")
+  max_date <- as.Date(paste0(current_year + 1, "-12-31"))
+
+  implausible <- !is.na(dates) & (dates < min_date | dates > max_date)
+  n_implausible <- sum(implausible, na.rm = TRUE)
+
+  if (n_implausible > 0) {
+    warning(n_implausible, " date(s) fall outside plausible range (2000 to ", current_year + 1, ")")
+  }
+
+  return(list(implausible = implausible, n_implausible = n_implausible))
+}
