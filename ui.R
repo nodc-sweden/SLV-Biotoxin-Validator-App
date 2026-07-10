@@ -7,15 +7,18 @@ ui <- fluidPage(
     sidebarPanel(
       fileInput("file_eurofins", "Upload Eurofins export file (.xlsx)", accept = ".xlsx"),
       fileInput("file_slv_summary", "Upload SLV summary (.xlsx) – Wild vs Farmed info", accept = ".xlsx"),
-      selectInput("coordinate_output", "Use position:", 
-                  choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"), 
+      selectInput("coordinate_output", "Use position:",
+                  choices = c("Reported GPS position" = "actual", "Midpoint production area" = "midpoint"),
                   selected = "midpoint"),
-      selectInput("sample_type", "Sample type:", 
-                  choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"), 
+      selectInput("sample_type", "Sample type:",
+                  choices = c("Animal flesh" = "live_bivalve_molluscs_v2", "Water" = "watersample"),
                   selected = "live_bivalve_molluscs_v2"),
-      downloadButton("download_data", "Download Processed .txt File"),
-      br(), br(),
-      downloadButton("download_analysis_info", "Download Analysis Info .txt File"),
+      conditionalPanel(
+        condition = "output.file_uploaded",
+        downloadButton("download_data", "Download Processed .txt File"),
+        br(), br(),
+        downloadButton("download_analysis_info", "Download Analysis Info .txt File")
+      ),
       width = 3
     ),
     mainPanel(
@@ -28,7 +31,7 @@ ui <- fluidPage(
         ),
         tabPanel("Map", leafletOutput("map", height = "800px")),
         tabPanel("Coordinate Validation", h4("Issues Found"), DTOutput("table_missing")),
-        tabPanel("Taxa Validation", 
+        tabPanel("Taxa Validation",
                  h4("Issues Found"),
                  DTOutput("table_taxa_issues"),
                  h4("Valid Entries"),
@@ -40,8 +43,8 @@ ui <- fluidPage(
                  h4("Valid Entries"),
                  DTOutput("table_sites_valid")
         ),
-        tabPanel("Origin Validation", 
-                 h4("Duplicate Inputs"), 
+        tabPanel("Origin Validation",
+                 h4("Duplicate Inputs"),
                  DTOutput("table_origin_duplicates"),
                  h4("Missing Origin Input"),
                  DTOutput("table_origin_missing")),
@@ -63,13 +66,13 @@ ui <- fluidPage(
         tabPanel("Original Data", DTOutput("table_raw")),
         tabPanel("About",
                  fluidRow(
-                   column(12, 
+                   column(12,
                           h3("About This Application"),
                           p("This Shiny application provides tools for validating and processing marine biotoxin data collected by the SLV."),
                           p("Instructions:"),
                           tags$ul(
                             tags$li("Upload and validate biotoxin data from Excel files, following the export format from Eurofins."),
-                            tags$li("Upload a summary Excel files, containing information on SAMPLE_ORIGIN (Wild/Culutured). Required columns are År, Mån, Dat, Nr, Art and V/O."),
+                            tags$li("Upload a summary Excel files, containing information on SAMPLE_ORIGIN (Wild/Cultured). Required columns are \u00c5r, M\u00e5n, Dat, Nr, Art and V/O."),
                             tags$li("Visualize sampling locations on an interactive map."),
                             tags$li("Check for missing or incorrect coordinates. Data in red color will require action before data submission to SHARK, orange may need attention."),
                             tags$li("Validate taxonomic names using the World Register of Marine Species (WoRMS). Data in red color require action."),
@@ -81,7 +84,7 @@ ui <- fluidPage(
                    style = "text-align:center; padding:10px; font-size:0.9em; color:#666;",
                    HTML(
                      paste0(
-                       "Version ", pkg_version, " – ",
+                       "Version ", pkg_version, " \u2013 ",
                        "<a href='", github_url, "' target='_blank'>GitHub repository</a>"
                      )
                    )
